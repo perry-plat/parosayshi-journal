@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
+import { ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, EyeSlashIcon, HighlighterIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
 import { PDFDocument } from "pdf-lib";
 import { useReducedMotion } from "../hooks/useReducedMotion";
 import { JournalDeskSurface } from "./JournalDeskSurface";
 import { JournalDappledLight } from "./JournalDappledLight";
+import { notebookPalette, type FolderMaterial, type JournalSnapshot } from "../lib/fieldNotesDb";
 import { JournalInkLayer } from "./JournalInkLayer";
 import {
   createJournalId,
@@ -544,7 +545,7 @@ function paginatePageText(value: string, textarea: HTMLTextAreaElement, limit: n
 }
 
 function createDeskSound() {
-  type SoundName = "backspace" | "key-1" | "key-2" | "key-3" | "key-4" | "return" | "space";
+  type SoundName = "backspace" | "highlighter-close" | "highlighter-draw" | "highlighter-open" | "key-1" | "key-2" | "key-3" | "key-4" | "return" | "space";
 
   type SoundShape = {
     gain: number;
@@ -558,6 +559,9 @@ function createDeskSound() {
     "key-4": "/assets/sounds/journal/key-4.wav?v=mechanical-2",
     space: "/assets/sounds/journal/space.wav?v=mechanical-2",
     backspace: "/assets/sounds/journal/backspace.wav?v=mechanical-2",
+    "highlighter-close": "/assets/sounds/journal/highlighter-close.wav?v=physical-1",
+    "highlighter-draw": "/assets/sounds/journal/highlighter-draw.wav?v=physical-3",
+    "highlighter-open": "/assets/sounds/journal/highlighter-open.wav?v=physical-1",
     return: "/assets/sounds/journal/return.wav?v=mechanical-2",
   };
   const regularKeys: SoundName[] = ["key-1", "key-2", "key-3", "key-4"];
@@ -567,6 +571,8 @@ function createDeskSound() {
   let lastStrikeAt = 0;
   let smoothedInterval = 0;
   let dynamics: SoundShape = { gain: 1, rate: 1 };
+  let markerFadeTimer = 0;
+  let markerLoop: { gain: GainNode; source: AudioBufferSourceNode } | null = null;
   const samples = new Map<string, AudioBuffer>();
   const heldKeys = new Map<string, number>();
 
@@ -605,7 +611,9 @@ function createDeskSound() {
         return;
       }
 
-      void warm();
+      void warm().then(() => {
+        if (samples.has(path)) playNow();
+      });
     };
 
     if (delay) window.setTimeout(playNow, delay);
@@ -641,7 +649,73 @@ function createDeskSound() {
     play(...second, delay);
   };
 
+  const stopMarkerStroke = () => {
+    window.clearTimeout(markerFadeTimer);
+    markerFadeTimer = 0;
+    const activeLoop = markerLoop;
+    if (!activeLoop || !context) return;
+    markerLoop = null;
+    const now = context.currentTime;
+    activeLoop.gain.gain.cancelScheduledValues(now);
+    activeLoop.gain.gain.setValueAtTime(Math.max(0.0001, activeLoop.gain.gain.value), now);
+    activeLoop.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+    window.setTimeout(() => {
+      try {
+        activeLoop.source.stop();
+      } catch {
+        // The source may already have ended during pointer release.
+      }
+    }, 70);
+  };
+
   return {
+    dispose() {
+      stopMarkerStroke();
+      void context?.close();
+      context = null;
+    },
+    markerClose() {
+      stopMarkerStroke();
+      play("highlighter-close", 0.82, 0.98 + Math.random() * 0.025);
+    },
+    markerMotion(intensity: number) {
+      if (intensity <= 0) {
+        stopMarkerStroke();
+        return;
+      }
+      const audio = ensureContext();
+      const recorded = samples.get(files["highlighter-draw"]);
+      if (!recorded) {
+        void warm();
+        return;
+      }
+      if (!markerLoop) {
+        const source = audio.createBufferSource();
+        const gain = audio.createGain();
+        source.buffer = recorded;
+        source.loop = true;
+        source.playbackRate.value = 0.99 + Math.random() * 0.02;
+        gain.gain.value = 0.0001;
+        source.connect(gain).connect(audio.destination);
+        markerLoop = { gain, source };
+        source.onended = () => {
+          if (markerLoop?.source === source) markerLoop = null;
+        };
+        source.start();
+      }
+      const now = audio.currentTime;
+      const target = outputGain * (0.18 + Math.min(1, intensity) * 0.17);
+      markerLoop.gain.gain.cancelScheduledValues(now);
+      markerLoop.gain.gain.setTargetAtTime(target, now, 0.018);
+      window.clearTimeout(markerFadeTimer);
+      markerFadeTimer = window.setTimeout(() => {
+        if (!markerLoop || !context) return;
+        markerLoop.gain.gain.setTargetAtTime(0.0001, context.currentTime, 0.032);
+      }, 105);
+    },
+    markerOpen() {
+      play("highlighter-open", 0.9, 0.985 + Math.random() * 0.025);
+    },
     warm,
     press(event: KeyboardEvent) {
       if (event.repeat) return;
@@ -684,7 +758,80 @@ function createDeskSound() {
   };
 }
 
-export function JournalPrompt({ onClose }: { onClose: () => void }) {
+type JournalPromptProps = {
+  folderTitle?: string;
+  journalKey?: string;
+  notebookMaterial?: FolderMaterial;
+  onClose: () => void;
+  onJournalChange?: (snapshot: JournalSnapshot) => void;
+  promptText?: string;
+};
+
+function NotebookCoverArtwork({ inside = false, material, title }: { inside?: boolean; material: FolderMaterial; title: string }) {
+  const palette = notebookPalette[material];
+  return (
+    <div
+      className="journal-prompt__notebook-cover-art"
+      data-inside={inside}
+      style={{ "--notebook-cover-color": palette.color, "--notebook-cover-edge": palette.edge, "--notebook-cover-ink": palette.ink } as React.CSSProperties}
+    >
+      <strong>{title}</strong>
+    </div>
+  );
+}
+
+let notebookCoverTexture: Promise<HTMLImageElement> | null = null;
+
+function loadNotebookCoverTexture() {
+  if (!notebookCoverTexture) {
+    notebookCoverTexture = new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Unable to load notebook cover texture."));
+      image.src = "/assets/textures/journal-cover-fiber-orange-v1.jpg";
+    });
+  }
+  return notebookCoverTexture;
+}
+
+async function drawNotebookCover(context: CanvasRenderingContext2D, title: string, material: FolderMaterial) {
+  const palette = notebookPalette[material];
+  const texture = await loadNotebookCoverTexture();
+  context.save();
+  context.fillStyle = palette.color;
+  context.fillRect(0, 0, PDF_WIDTH, PDF_HEIGHT);
+  context.drawImage(texture, 0, 0, PDF_WIDTH, PDF_HEIGHT);
+  const shade = context.createLinearGradient(0, 0, PDF_WIDTH, PDF_HEIGHT);
+  shade.addColorStop(0, "rgba(255, 255, 255, .11)");
+  shade.addColorStop(.35, "rgba(255, 255, 255, 0)");
+  shade.addColorStop(1, "rgba(32, 16, 11, .13)");
+  context.fillStyle = shade;
+  context.fillRect(0, 0, PDF_WIDTH, PDF_HEIGHT);
+  context.strokeStyle = "rgba(28, 19, 16, .34)";
+  context.lineWidth = 5;
+  context.strokeRect(76, 76, PDF_WIDTH - 152, PDF_HEIGHT - 152);
+  context.fillStyle = palette.ink;
+  context.font = "400 174px Georgia, 'Times New Roman', serif";
+  (context as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = "0px";
+  const maxTitleWidth = PDF_WIDTH - 360;
+  const words = title.split(" ");
+  const titleLines: string[] = [];
+  let currentLine = "";
+  for (const word of words) {
+    const candidate = currentLine ? `${currentLine} ${word}` : word;
+    if (currentLine && context.measureText(candidate).width > maxTitleWidth) {
+      titleLines.push(currentLine);
+      currentLine = word;
+    } else currentLine = candidate;
+  }
+  if (currentLine) titleLines.push(currentLine);
+  const lineHeight = 178;
+  const firstBaseline = PDF_HEIGHT / 2 - ((titleLines.length - 1) * lineHeight) / 2 + 58;
+  titleLines.forEach((line, index) => context.fillText(line, 180, firstBaseline + index * lineHeight));
+  context.restore();
+}
+
+export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kraft", onClose, onJournalChange, promptText }: JournalPromptProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const paperRef = useRef<HTMLDivElement | null>(null);
   const pickedUpPaperRef = useRef<HTMLDivElement | null>(null);
@@ -700,19 +847,19 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
   const soundRef = useRef<ReturnType<typeof createDeskSound> | null>(null);
   const reducedMotion = useReducedMotion();
   const [promptIndex] = useState(() => daySeed() % prompts.length);
-  const prompt = prompts[promptIndex];
+  const prompt = promptText ?? prompts[promptIndex];
+  const entryKey = journalKey ?? prompt;
+  const notebookPaletteEntry = notebookPalette[notebookMaterial];
   const [drafts, setDrafts] = useState<JournalDrafts>(loadDrafts);
-  const [initialEntry] = useState(() => normalizeEntry(drafts[prompt]));
+  const [initialEntry] = useState(() => normalizeEntry(drafts[entryKey]));
   const [answer, setAnswer] = useState(initialEntry.current);
   const [livePageId, setLivePageId] = useState(initialEntry.currentId);
   const [pages, setPages] = useState(initialEntry.pages);
   const [highlightStrokes, setHighlightStrokes] = useState<HighlightStroke[]>([]);
   const [highlighterActive, setHighlighterActive] = useState(false);
-  const [inkSaveState, setInkSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [wetStrokeActive, setWetStrokeActive] = useState(false);
-  const [showInkHint, setShowInkHint] = useState(() => {
+  const [highlighterVisible, setHighlighterVisible] = useState(() => {
     try {
-      return window.localStorage.getItem(`${storageKey}:ink-introduced`) !== "true";
+      return window.localStorage.getItem(`${storageKey}:highlighter-visible`) !== "false";
     } catch {
       return true;
     }
@@ -728,7 +875,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
   const [draggingPageId, setDraggingPageId] = useState<string | null>(null);
   const [deskTidy, setDeskTidy] = useState(() => {
     try {
-      return window.localStorage.getItem(`${storageKey}:desk-tidy:${prompt}`) === "true";
+      return window.localStorage.getItem(`${storageKey}:desk-tidy:${entryKey}`) === "true";
     } catch {
       return false;
     }
@@ -745,9 +892,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
       .then((strokes) => {
         if (!cancelled) setHighlightStrokes(strokes);
       })
-      .catch(() => {
-        if (!cancelled) setInkSaveState("error");
-      });
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -758,6 +903,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
       if (event.key !== "Escape" || !highlighterActive) return;
       event.preventDefault();
       event.stopPropagation();
+      soundRef.current?.markerClose();
       setHighlighterActive(false);
       window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
     };
@@ -767,17 +913,33 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
 
   const commitHighlight = useCallback((stroke: HighlightStroke) => {
     setHighlightStrokes((current) => [...current, stroke]);
-    setInkSaveState("saving");
     const save = (attempt: number) => {
       void persistHighlightStroke(stroke)
-        .then(() => setInkSaveState("saved"))
         .catch(() => {
-          setInkSaveState("error");
           if (attempt < 5) window.setTimeout(() => save(attempt + 1), Math.min(8000, 500 * 2 ** attempt));
         });
     };
     save(0);
   }, []);
+
+  const soundHighlightMotion = useCallback((intensity: number) => {
+    soundRef.current?.markerMotion(intensity);
+  }, []);
+
+  const toggleHighlighterVisibility = () => {
+    const nextVisible = !highlighterVisible;
+    if (!nextVisible) {
+      if (highlighterActive) soundRef.current?.markerClose();
+      setHighlighterActive(false);
+      window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+    }
+    setHighlighterVisible(nextVisible);
+    try {
+      window.localStorage.setItem(`${storageKey}:highlighter-visible`, String(nextVisible));
+    } catch {
+      // The visibility preference can remain session-local when storage is unavailable.
+    }
+  };
 
   useLayoutEffect(() => {
     let frame = 0;
@@ -1090,7 +1252,8 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
   }, [reducedMotion, releasingPageId]);
 
   useEffect(() => {
-    soundRef.current = createDeskSound();
+    const sound = createDeskSound();
+    soundRef.current = sound;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const frame = window.requestAnimationFrame(() => {
@@ -1109,6 +1272,8 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => {
+      sound.dispose();
+      if (soundRef.current === sound) soundRef.current = null;
       window.cancelAnimationFrame(frame);
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeOnEscape);
@@ -1157,25 +1322,27 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
   }, [activeArchivedId, deskArranging, deskTidy, pages.length]);
 
   useEffect(() => {
-    const nextDrafts = { ...drafts, [prompt]: { current: answer, currentId: livePageId, pages } };
+    const snapshot = { current: answer, currentId: livePageId, pages };
+    const nextDrafts = { ...drafts, [entryKey]: snapshot };
     const timer = window.setTimeout(() => {
       try {
         window.localStorage.setItem(storageKey, JSON.stringify(nextDrafts));
         setDrafts(nextDrafts);
+        onJournalChange?.(snapshot);
       } catch {
         // The writing experience remains usable when browser storage is unavailable.
       }
     }, 280);
     return () => window.clearTimeout(timer);
-  }, [answer, livePageId, pages, prompt]);
+  }, [answer, entryKey, livePageId, onJournalChange, pages]);
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(`${storageKey}:desk-tidy:${prompt}`, String(deskTidy));
+      window.localStorage.setItem(`${storageKey}:desk-tidy:${entryKey}`, String(deskTidy));
     } catch {
       // Desk arrangement can remain session-local when browser storage is unavailable.
     }
-  }, [deskTidy, prompt]);
+  }, [deskTidy, entryKey]);
 
   const meaningfulPages = pages.filter((page) => page.text.trim() || highlightStrokes.some((stroke) => stroke.pageId === page.id));
   const livePageHasInk = highlightStrokes.some((stroke) => stroke.pageId === livePageId);
@@ -1191,7 +1358,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
     }),
   );
   const exportBookSheets = [
-    { back: null, front: null, key: "field-file-cover", kind: "cover" as const },
+    { back: null, front: null, key: "notebook-cover", kind: "cover" as const },
     ...exportLeaves.map((leaf, index) => ({
       ...leaf,
       key: `${leaf.front?.id ?? "blank"}-${leaf.back?.id ?? "blank"}-${index}`,
@@ -1353,10 +1520,18 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
     canvas.height = PDF_HEIGHT;
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) return;
+    await drawNotebookCover(context, folderTitle ?? "Field notes", notebookMaterial);
+    const coverPng = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Unable to render the notebook cover.")), "image/png");
+    });
+    const coverBytes = new Uint8Array(await coverPng.arrayBuffer());
+    const coverImage = await documentCopy.embedPng(coverBytes);
+    const coverPage = documentCopy.addPage([595.28, 841.89]);
+    coverPage.drawImage(coverImage, { height: coverPage.getHeight(), width: coverPage.getWidth(), x: 0, y: 0 });
     for (const [index, page] of exportSheets.entries()) {
       renderJournalPage(context, {
         page,
-        pageNumber: index + 1,
+        pageNumber: index + 2,
         strokes: highlightStrokes,
         tone: "fresh",
       });
@@ -1368,7 +1543,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
       const pdfPage = documentCopy.addPage([595.28, 841.89]);
       pdfPage.drawImage(image, { height: pdfPage.getHeight(), width: pdfPage.getWidth(), x: 0, y: 0 });
     }
-    const safePrompt = prompt
+    const safePrompt = (folderTitle ?? prompt)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
@@ -1386,7 +1561,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
       download.remove();
       URL.revokeObjectURL(fileUrl);
     }, 120_000);
-  }, [exportSheets, highlightStrokes, prompt]);
+  }, [exportSheets, folderTitle, highlightStrokes, notebookMaterial, prompt]);
 
   const bumpPaper = () => {
     if (reducedMotion) return;
@@ -1458,7 +1633,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
       }}
       role="dialog"
       aria-modal="true"
-      aria-label="Journal writing desk"
+      aria-label={`${folderTitle ?? "Journal"} writing desk`}
     >
       <JournalDeskSurface
         archivedCount={pages.length}
@@ -1471,9 +1646,12 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
       {exportPreviewOpen && exportSheets.length ? (
         <section className="journal-prompt__export-viewer" aria-label="Field notes preview" role="dialog" aria-modal="true">
           <div className="journal-prompt__export-print" aria-hidden="true">
+            <article className="journal-prompt__export-paper journal-prompt__export-paper--cover">
+              <NotebookCoverArtwork material={notebookMaterial} title={folderTitle ?? "Field notes"} />
+            </article>
             {exportSheets.map((page, index) => (
               <article className="journal-prompt__export-paper" key={page.id}>
-                <InkedPagePreview densityCap={2} page={page} pageNumber={index + 1} strokes={highlightStrokes} tone="fresh" />
+                <InkedPagePreview densityCap={2} page={page} pageNumber={index + 2} strokes={highlightStrokes} tone="fresh" />
               </article>
             ))}
           </div>
@@ -1484,7 +1662,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
               data-cover-turning={exportTurningIndex === 0}
               data-open={exportBookOpen}
               data-turning={exportTurningIndex !== null}
-              aria-label={exportBookOpen ? `Field-file copy, spread ${exportPageIndex} of ${exportLeaves.length}` : "Closed field-file copy. Click to open."}
+              aria-label={exportBookOpen ? `${folderTitle ?? "Field notes"} notebook, spread ${exportPageIndex} of ${exportLeaves.length}` : `Closed ${folderTitle ?? "Field notes"} notebook. Click to open.`}
               onClick={(event) => {
                 if (!exportBookOpen) {
                   turnExportBook(1, 0);
@@ -1501,6 +1679,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
                 if (event.key === "ArrowRight") turnExportBook(exportPageIndex + 1, exportPageIndex);
               }}
               role="group"
+              style={{ "--cover-color": notebookPaletteEntry.color, "--cover-edge": notebookPaletteEntry.edge, "--cover-ink": notebookPaletteEntry.ink } as React.CSSProperties}
               tabIndex={0}
             >
               <div className="journal-prompt__keepsake-cover" aria-hidden="true" />
@@ -1526,12 +1705,13 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
                 >
                   <div className="journal-prompt__keepsake-face journal-prompt__keepsake-face--front">
                     {leaf.kind === "cover" ? (
-                      <div className="journal-prompt__keepsake-cover-face journal-prompt__keepsake-cover-face--outside" />
+                      <div className="journal-prompt__keepsake-cover-face journal-prompt__keepsake-cover-face--outside"><NotebookCoverArtwork material={notebookMaterial} title={folderTitle ?? "Field notes"} /></div>
                     ) : leaf.front ? <InkedPagePreview densityCap={2} page={leaf.front} pageNumber={(index - 1) * 2 + 1} strokes={highlightStrokes} tone="fresh" /> : null}
                   </div>
                   <div className="journal-prompt__keepsake-face journal-prompt__keepsake-face--back">
                     {leaf.kind === "cover" ? (
                       <div className="journal-prompt__keepsake-cover-face journal-prompt__keepsake-cover-face--inside">
+                        <NotebookCoverArtwork inside material={notebookMaterial} title={folderTitle ?? "Field notes"} />
                         <i className="journal-prompt__keepsake-endpaper" aria-hidden="true" />
                       </div>
                     ) : leaf.back ? <InkedPagePreview densityCap={2} page={leaf.back} pageNumber={(index - 1) * 2 + 2} strokes={highlightStrokes} tone="fresh" /> : null}
@@ -1750,7 +1930,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
               <JournalInkLayer
                 active={highlighterActive && !activeArchivedPage}
                 onCommit={commitHighlight}
-                onWetChange={setWetStrokeActive}
+                onStrokeMotion={soundHighlightMotion}
                 pageId={livePageId}
                 strokes={highlightStrokes}
               />
@@ -1801,7 +1981,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
                 <JournalInkLayer
                   active={highlighterActive && returningPaperId !== activeArchivedPage.id}
                   onCommit={commitHighlight}
-                  onWetChange={setWetStrokeActive}
+                  onStrokeMotion={soundHighlightMotion}
                   pageId={activeArchivedPage.id}
                   strokes={highlightStrokes}
                 />
@@ -1814,26 +1994,19 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
           ) : null}
         </div>
 
-        <div className="journal-prompt__marker-station" data-active={highlighterActive}>
+        {highlighterVisible ? <div className="journal-prompt__marker-station" data-active={highlighterActive}>
             <button
-              aria-label={highlighterActive ? "Put down the highlighter and return to typing" : "Pick up the highlighter"}
+              aria-label="Highlighter"
               aria-pressed={highlighterActive}
               className="journal-prompt__marker"
               onClick={() => {
                 const nextActive = !highlighterActive;
+                if (nextActive) soundRef.current?.markerOpen();
+                else soundRef.current?.markerClose();
                 setHighlighterActive(nextActive);
                 if (nextActive) textareaRef.current?.blur();
                 if (!nextActive) window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
-                if (nextActive && showInkHint) {
-                  try {
-                    window.localStorage.setItem(`${storageKey}:ink-introduced`, "true");
-                  } catch {
-                    // The reminder can remain session-local when storage is unavailable.
-                  }
-                  window.setTimeout(() => setShowInkHint(false), 3200);
-                }
               }}
-              title={highlighterActive ? "Put down highlighter (Esc)" : "Pick up highlighter"}
               type="button"
             >
               <span aria-hidden="true" className="journal-prompt__marker-figure">
@@ -1843,10 +2016,7 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
                 <img alt="" className="journal-prompt__marker-cap" draggable="false" src="/assets/tools/journal-highlighter-cap-v2.png" />
               </span>
             </button>
-            <span aria-live="polite" className="journal-prompt__ink-status">
-              {showInkHint && highlighterActive ? "INK STAYS ON THIS SHEET" : inkSaveState === "saving" ? "DRYING…" : inkSaveState === "error" ? "INK NOT FILED · RETRYING" : ""}
-            </span>
-        </div>
+        </div> : null}
 
         <div className="journal-prompt__tools" aria-label="Writing tools" role="toolbar">
           {activeArchivedPage ? (
@@ -1857,6 +2027,15 @@ export function JournalPrompt({ onClose }: { onClose: () => void }) {
           ) : deletedPage ? (
             <button aria-label="Undo deleted page" onClick={undoDelete} type="button"><ArrowCounterClockwiseIcon aria-hidden="true" size={17} />Undo delete</button>
           ) : null}
+          <button
+            aria-label={highlighterVisible ? "Hide highlighter" : "Show highlighter"}
+            aria-pressed={!highlighterVisible}
+            onClick={toggleHighlighterVisibility}
+            type="button"
+          >
+            {highlighterVisible ? <EyeSlashIcon aria-hidden="true" size={17} /> : <HighlighterIcon aria-hidden="true" size={17} />}
+            {highlighterVisible ? "Hide marker" : "Show marker"}
+          </button>
           <button
             aria-label={deskTidy ? "Tidy and realign pages again" : "Arrange pages into a tidy desk"}
             aria-pressed={deskTidy}

@@ -12,6 +12,7 @@ import {
 type JournalInkLayerProps = {
   active: boolean;
   onCommit: (stroke: HighlightStroke) => void;
+  onStrokeMotion?: (intensity: number) => void;
   onWetChange?: (wet: boolean) => void;
   pageId: string;
   strokes: HighlightStroke[];
@@ -32,7 +33,7 @@ function pointerPoint(event: PointerEvent | React.PointerEvent<HTMLCanvasElement
   };
 }
 
-export function JournalInkLayer({ active, onCommit, onWetChange, pageId, strokes }: JournalInkLayerProps) {
+export function JournalInkLayer({ active, onCommit, onStrokeMotion, onWetChange, pageId, strokes }: JournalInkLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameRef = useRef(0);
   const wetRef = useRef<WetStroke | null>(null);
@@ -65,9 +66,10 @@ export function JournalInkLayer({ active, onCommit, onWetChange, pageId, strokes
     const canvas = canvasRef.current;
     if (wet && canvas?.hasPointerCapture(wet.pointerId)) canvas.releasePointerCapture(wet.pointerId);
     wetRef.current = null;
+    onStrokeMotion?.(0);
     onWetChange?.(false);
     scheduleDraw();
-  }, [onWetChange, scheduleDraw]);
+  }, [onStrokeMotion, onWetChange, scheduleDraw]);
 
   useLayoutEffect(() => {
     if (frameRef.current) {
@@ -143,14 +145,17 @@ export function JournalInkLayer({ active, onCommit, onWetChange, pageId, strokes
         const canvas = event.currentTarget;
         const coalescedEvents = event.nativeEvent.getCoalescedEvents?.() ?? [];
         const events = coalescedEvents.length ? coalescedEvents : [event.nativeEvent];
+        let travelled = 0;
         events.forEach((coalesced) => {
           const point = pointerPoint(coalesced, canvas);
           const previous = wet.points.at(-1)!;
           const distance = Math.hypot(point.x - previous.x, point.y - previous.y);
           if (distance < 0.55 && point.t - previous.t < 14) return;
           wet.distance += distance;
+          travelled += distance;
           wet.points.push(point);
         });
+        if (travelled > 0) onStrokeMotion?.(Math.min(1, 0.22 + travelled / 11));
         scheduleDraw();
       }}
       onPointerUp={(event) => {
@@ -159,6 +164,7 @@ export function JournalInkLayer({ active, onCommit, onWetChange, pageId, strokes
         event.preventDefault();
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
         wetRef.current = null;
+        onStrokeMotion?.(0);
         onWetChange?.(false);
         const committed = wet.distance >= 4.5 && wet.points.length >= 2;
         if (committed) {
