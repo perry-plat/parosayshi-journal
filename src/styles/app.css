@@ -1,4 +1,6 @@
 :root {
+  --product-display-font: "Averia Serif Libre", Georgia, serif;
+  --product-display-tracking: -.1em;
   --product-ui-font: "Geist Mono Variable", "Geist Mono", monospace;
   --product-stone: #f2f0ee;
   --product-ink: #171717;
@@ -169,36 +171,147 @@ button { -webkit-tap-highlight-color: transparent; }
 .product-threshold__privacy { margin: 30px 0 0; }
 .product-threshold__error { color: #8e302b; }
 
-.product-notebook-name__form { display: grid; gap: 12px; }
-.product-notebook-name__form label { color: #6f6d69; font-size: 11px; font-weight: 400; letter-spacing: -.0275em; }
-.product-notebook-name__form input {
-  width: 100%;
-  padding: 10px 0 9px;
-  border: 0;
-  border-bottom: 1px solid rgb(23 23 23 / 42%);
-  outline: 0;
-  color: var(--product-ink);
-  background: transparent;
+.product-visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; white-space: nowrap !important; }
+
+.product-notebook-name {
+  --onboarding-notebook-width: min(480px, calc((100vw - 136px) / 2), calc((100dvh - 72px) * .75));
+  --onboarding-notebook-top: clamp(300px, 38vh, 410px);
+  --notebook-contact-x: 0px;
+  --notebook-contact-y: 7px;
+  --notebook-shadow-x: 0px;
+  --notebook-shadow-y: 28px;
+  display: block;
+  color: #ece8e0;
+  background: #282827;
+  overflow: hidden;
+}
+.product-notebook-name::before { opacity: .14; }
+.product-notebook-name .journal-prompt__dappled-light {
+  z-index: 5;
+  opacity: .62;
+  animation: journal-dappled-light-arrive 1800ms linear 180ms both;
+}
+.product-notebook-name__onboarding {
+  position: absolute;
+  inset: 0;
+}
+.product-notebook-name__form { position: absolute; inset: 0; }
+.product-notebook-name__cover {
+  position: absolute;
+  top: var(--onboarding-notebook-top);
+  left: 50%;
+  z-index: 2;
+  width: var(--onboarding-notebook-width);
+  aspect-ratio: 1 / 1.414;
+  animation: product-notebook-arrive 620ms cubic-bezier(.18,.82,.22,1) both;
+  border-radius: 5px 26px 26px 5px;
+  box-shadow:
+    var(--notebook-contact-x) var(--notebook-contact-y) 7px -2px rgb(0 0 0 / 17%),
+    var(--notebook-shadow-x) var(--notebook-shadow-y) 48px -10px rgb(0 0 0 / 27%);
+  transform: translateX(-50%);
+  transform-origin: 50% 50%;
+  transition: box-shadow 150ms ease-out;
+  overflow: visible;
+}
+.product-notebook-name__instruction-slip {
+  --slip-drag-x: 0px;
+  --slip-drag-y: 0px;
+  --slip-scale: 1;
+  position: absolute;
+  top: -180px;
+  left: -58px;
+  z-index: 1;
+  display: flex;
+  width: clamp(174px, 12vw, 198px);
+  min-height: 220px;
+  flex-direction: column;
+  padding: 19px 17px 17px;
+  overflow: hidden;
+  color: #25231f;
+  background:
+    url("/assets/textures/paper-fiber-cc0.jpg") center / 420px auto,
+    #efede5;
+  border: 1px solid rgb(75 68 56 / 13%);
+  border-radius: 1px;
+  box-shadow: 1px 4px 4px rgb(0 0 0 / 16%), 7px 13px 22px rgb(0 0 0 / 17%), inset 0 1px rgb(255 255 255 / 52%);
+  clip-path: polygon(.4% .8%, 99.6% 0, 100% 99.1%, .8% 100%, 0 64%);
+  cursor: grab;
   font-family: var(--product-ui-font);
-  font-size: 13.6px;
-  font-weight: 300;
-  letter-spacing: -.0275em;
+  touch-action: none;
+  transform: translate(var(--slip-drag-x), var(--slip-drag-y)) rotate(1.2deg) scale(var(--slip-scale));
+  transform-origin: 50% 50%;
+  transition: box-shadow 150ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
+  user-select: none;
 }
-.product-notebook-name__form input:focus { border-bottom-color: var(--product-ink); }
-.product-notebook-name__form button {
-  margin-top: 13px;
-  padding: 12px 16px;
-  border: 1px solid var(--product-ink);
-  color: var(--product-stone);
-  background: var(--product-ink);
+.product-notebook-name__instruction-slip[data-dragging="true"] { --slip-scale: 1.012; box-shadow: 2px 7px 7px rgb(0 0 0 / 15%), 12px 20px 31px rgb(0 0 0 / 22%), inset 0 1px rgb(255 255 255 / 52%); cursor: grabbing; transition: none; }
+.product-notebook-name__slip-brand { display: flex; min-height: 48px; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px; }
+.product-notebook-name__slip-brand img { width: 31px; height: 31px; flex: 0 0 auto; filter: saturate(.62); mix-blend-mode: multiply; object-fit: contain; opacity: .86; }
+.product-notebook-name__instruction-slip .product-notebook-name__slip-brand small { font-size: clamp(8px, .62vw, 10px); font-weight: 620; letter-spacing: .055em; }
+.product-notebook-name__instruction-slip small { font-size: clamp(6px, .48vw, 8px); font-weight: 500; letter-spacing: .055em; line-height: 1.45; }
+.product-notebook-name__instruction-slip h1 { width: 11.5ch; margin: 18px 0 32px; font: 400 clamp(17px, 1.28vw, 20px)/1.02 var(--product-display-font); letter-spacing: -.055em; }
+.product-notebook-name__instruction-slip small { display: block; opacity: .62; }
+.product-notebook-name__cover .journal-prompt__notebook-cover-art { z-index: 2; border-radius: inherit; }
+.product-notebook-name__cover .journal-prompt__notebook-cover-art > strong { width: 72%; margin-top: 21%; }
+.product-notebook-name__cover input {
+  width: 100%;
+  padding: 3px 6px 13px;
+  border: 0;
+  border-bottom: 3px solid var(--notebook-cover-ink);
+  outline: 0;
+  color: var(--notebook-cover-ink);
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  text-align: center;
+}
+.product-notebook-name__cover input::placeholder { color: color-mix(in srgb, var(--notebook-cover-ink), transparent 56%); opacity: 1; }
+.product-notebook-name__cover input:focus { border-bottom-color: var(--notebook-cover-ink); }
+.product-notebook-name__actions {
+  position: absolute;
+  top: calc(var(--onboarding-notebook-top) + (var(--onboarding-notebook-width) * .92));
+  left: 50%;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transform: translateX(-50%);
+}
+.product-notebook-name__cta {
+  width: min(170px, calc(var(--onboarding-notebook-width) * .35));
+  min-height: 54px;
+  padding: 13px 18px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: #171717;
+  background: #f7f6f2;
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 400;
-  letter-spacing: -.0275em;
+  font-size: clamp(10px, .74vw, 12px);
+  font-weight: 500;
+  letter-spacing: -.015em;
+  transform-origin: center;
 }
-.product-notebook-name__form button:disabled { cursor: not-allowed; opacity: .36; }
-.product-notebook-name__account { display: flex; align-items: center; justify-content: space-between; margin-top: 34px; color: #6f6d69; font-size: 10px; font-weight: 300; letter-spacing: -.0275em; }
-.product-notebook-name__account button { display: flex; align-items: center; gap: 6px; padding: 0; border: 0; border-bottom: 1px solid currentColor; color: #4a4845; background: transparent; cursor: pointer; font-size: 10px; }
+.product-notebook-name__cta--fresh { color: rgb(255 250 243 / .9); background: rgb(32 29 26 / .34); border-color: rgb(255 248 239 / .38); backdrop-filter: blur(5px); }
+.product-notebook-name__cta--fresh:hover { color: #171717; background: #f7f6f2; }
+.product-notebook-name__cta:disabled { cursor: not-allowed; opacity: .5; }
+
+.product-fresh-notebook { position: fixed; inset: 0; z-index: 60; display: grid; padding: 24px; background: rgb(13 13 12 / .66); place-items: center; backdrop-filter: blur(5px); }
+.product-fresh-notebook__sheet { position: relative; width: min(430px, calc(100vw - 32px)); padding: 34px 34px 30px; color: #24221e; background: url("/assets/textures/paper-fiber-cc0.jpg") center / 520px auto, #f1efe8; border: 1px solid rgb(255 255 255 / .46); box-shadow: 2px 5px 6px rgb(0 0 0 / .18), 18px 28px 64px rgb(0 0 0 / .32); font-family: var(--product-ui-font); }
+.product-fresh-notebook__sheet > small { display: block; padding-right: 36px; color: rgb(36 34 30 / .54); font-size: 8px; letter-spacing: .11em; }
+.product-fresh-notebook__sheet h2 { max-width: 9ch; margin: 38px 0 18px; font: 400 clamp(34px, 4.4vw, 50px)/.88 var(--product-display-font); letter-spacing: var(--product-display-tracking); }
+.product-fresh-notebook__sheet p { max-width: 40ch; margin: 0; color: rgb(36 34 30 / .7); font-size: 11px; letter-spacing: -.02em; line-height: 1.55; }
+.product-fresh-notebook__close { position: absolute; top: 16px; right: 16px; display: grid; width: 34px; height: 34px; padding: 0; color: #292722; background: transparent; border: 1px solid rgb(41 39 34 / .18); border-radius: 50%; cursor: pointer; place-items: center; }
+.product-fresh-notebook__close:hover { color: #f1efe8; background: #292722; }
+.product-fresh-notebook__actions { display: flex; align-items: stretch; gap: 8px; margin-top: 30px; }
+.product-fresh-notebook__actions button { min-height: 44px; flex: 1; padding: 10px 12px; color: #292722; background: transparent; border: 1px solid rgb(41 39 34 / .3); cursor: pointer; font-size: 10px; }
+.product-fresh-notebook__actions button:hover:not(:disabled) { background: rgb(41 39 34 / .08); }
+.product-fresh-notebook__actions .product-fresh-notebook__create { color: #f4f1e9; background: #292722; }
+.product-fresh-notebook__actions .product-fresh-notebook__create:hover:not(:disabled) { background: #11110f; }
+.product-fresh-notebook__actions button:disabled { cursor: default; opacity: .48; }
+@keyframes product-notebook-arrive {
+  from { opacity: 0; transform: translate(-50%, 70px) scale(.97); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
 
 .folder-desk {
   display: flex;
@@ -359,6 +472,13 @@ button { -webkit-tap-highlight-color: transparent; }
   .product-threshold { padding: 32px 16px; }
   .product-threshold__sheet { min-height: 485px; padding-top: 62px; }
   .product-threshold__registration { display: none; }
+  .product-notebook-name { --onboarding-notebook-top: 40vh; --onboarding-notebook-width: min(480px, calc(100vw - 24px), calc((100dvh - 56px) / 1.414)); padding: 0; }
+  .product-notebook-name__cover { left: 50%; }
+  .product-notebook-name__instruction-slip { top: -164px; left: 18px; width: 156px; min-height: 204px; padding: 17px 15px 15px; }
+  .product-notebook-name__slip-brand img { width: 28px; height: 28px; }
+  .product-notebook-name__cover .journal-prompt__notebook-cover-art > strong { width: 63%; margin-top: 18%; }
+  .product-notebook-name__actions { gap: 7px; }
+  .product-notebook-name__cta { width: min(154px, calc((100vw - 38px) / 2)); min-height: 50px; padding-inline: 12px; }
   .folder-desk { padding-inline: 18px; }
   .folder-desk__header { align-items: flex-start; }
   .folder-desk__account span { display: none; }
@@ -371,6 +491,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .product-notebook-name__cover { animation: none; }
   .field-folder { transition: none; }
 }
 

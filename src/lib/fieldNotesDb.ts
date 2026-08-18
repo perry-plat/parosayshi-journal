@@ -216,6 +216,10 @@ export async function listFolders(ownerId = LOCAL_OWNER_ID) {
   }));
 }
 
+export async function getJournalSnapshot(folderId: string) {
+  return (await fieldNotesDb.journals.get(folderId))?.snapshot ?? null;
+}
+
 export async function createFolder(title = "Untitled field notes", ownerId = LOCAL_OWNER_ID) {
   const folders = await listFolders(ownerId);
   const now = Date.now();
@@ -244,6 +248,39 @@ export async function createFolder(title = "Untitled field notes", ownerId = LOC
   });
   await queueChange({ ownerId, entity: "folder", entityId: id, operation: "upsert", payload: folder });
   return folder;
+}
+
+export async function rolloverNotebook(current: FieldFolder) {
+  const now = Date.now();
+  const id = makeId("folder");
+  const nextFolder: FieldFolder = {
+    id,
+    ownerId: current.ownerId,
+    title: "Field notes",
+    note: "New collection",
+    material: current.material,
+    journalKey: `field-notes:folder:${id}`,
+    prompt: starterPrompts[Math.abs(current.createdAt) % starterPrompts.length],
+    sortOrder: current.sortOrder,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const archivedFolder = { ...current, archivedAt: now, updatedAt: now };
+  await fieldNotesDb.transaction("rw", fieldNotesDb.folders, fieldNotesDb.journals, fieldNotesDb.outbox, async () => {
+    await fieldNotesDb.folders.put(archivedFolder);
+    await fieldNotesDb.folders.add(nextFolder);
+    await fieldNotesDb.journals.add({
+      id,
+      folderId: id,
+      ownerId: current.ownerId,
+      snapshot: { current: "", currentId: makeId("page"), pages: [] },
+      revision: 1,
+      updatedAt: now,
+    });
+    await queueChange({ ownerId: current.ownerId, entity: "folder", entityId: current.id, operation: "archive", payload: archivedFolder });
+    await queueChange({ ownerId: current.ownerId, entity: "folder", entityId: id, operation: "upsert", payload: nextFolder });
+  });
+  return nextFolder;
 }
 
 export async function renameFolder(id: string, title: string) {

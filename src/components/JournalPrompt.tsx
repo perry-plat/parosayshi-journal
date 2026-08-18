@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArchiveIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, EyeSlashIcon, HighlighterIcon, PencilSimpleIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { ArchiveIcon, ArrowCounterClockwiseIcon, ArrowLeftIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, EraserIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
+import { BookCopyIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { PDFDocument } from "pdf-lib";
 import { useReducedMotion } from "../hooks/useReducedMotion";
 import { JournalDeskSurface } from "./JournalDeskSurface";
@@ -808,13 +810,12 @@ type JournalPromptProps = {
   journalKey?: string;
   notebookMaterial?: FolderMaterial;
   onArchiveNotebook?: () => void | Promise<void>;
-  onClose: () => void;
+  onHome?: () => void;
   onJournalChange?: (snapshot: JournalSnapshot) => void;
-  onRenameNotebook?: () => void | Promise<void>;
   promptText?: string;
 };
 
-function NotebookCoverArtwork({ inside = false, material, title }: { inside?: boolean; material: FolderMaterial; title: string }) {
+export function NotebookCoverArtwork({ children, inside = false, material, title }: { children?: ReactNode; inside?: boolean; material: FolderMaterial; title?: string }) {
   const palette = notebookPalette[material];
   return (
     <div
@@ -822,7 +823,43 @@ function NotebookCoverArtwork({ inside = false, material, title }: { inside?: bo
       data-inside={inside}
       style={{ "--notebook-cover-color": palette.color, "--notebook-cover-edge": palette.edge, "--notebook-cover-ink": palette.ink } as React.CSSProperties}
     >
-      <strong>{title}</strong>
+      <strong>{children ?? title}</strong>
+    </div>
+  );
+}
+
+type PhysicalHighlighterProps = {
+  active: boolean;
+  className?: string;
+  initialEntry?: boolean;
+  onToggle: () => void;
+  visible?: boolean;
+};
+
+export function PhysicalHighlighter({ active, className = "", initialEntry = false, onToggle, visible = true }: PhysicalHighlighterProps) {
+  return (
+    <div
+      aria-hidden={!visible}
+      className={`journal-prompt__marker-station ${className}`.trim()}
+      data-active={active}
+      data-initial-entry={initialEntry}
+      data-visible={visible}
+    >
+      <button
+        aria-label="Highlighter"
+        aria-pressed={active}
+        className="journal-prompt__marker"
+        onClick={onToggle}
+        tabIndex={visible ? 0 : -1}
+        type="button"
+      >
+        <span aria-hidden="true" className="journal-prompt__marker-figure">
+          <i className="journal-prompt__marker-contact-shadow" />
+          <img alt="" className="journal-prompt__marker-capped" draggable="false" src="/assets/tools/journal-mini-highlighter-capped-v1.png" />
+          <img alt="" className="journal-prompt__marker-body" draggable="false" src="/assets/tools/journal-mini-highlighter-body-v1.png" />
+          <img alt="" className="journal-prompt__marker-cap" draggable="false" src="/assets/tools/journal-mini-highlighter-cap-v1.png" />
+        </span>
+      </button>
     </div>
   );
 }
@@ -858,7 +895,7 @@ async function drawNotebookCover(context: CanvasRenderingContext2D, title: strin
   context.lineWidth = 5;
   context.strokeRect(76, 76, PDF_WIDTH - 152, PDF_HEIGHT - 152);
   context.fillStyle = palette.ink;
-  context.font = "400 174px Georgia, 'Times New Roman', serif";
+  context.font = "400 174px 'Averia Serif Libre', Georgia, serif";
   (context as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = "0px";
   const maxTitleWidth = PDF_WIDTH - 360;
   const words = title.split(" ");
@@ -878,7 +915,99 @@ async function drawNotebookCover(context: CanvasRenderingContext2D, title: strin
   context.restore();
 }
 
-export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kraft", onArchiveNotebook, onClose, onJournalChange, onRenameNotebook, promptText }: JournalPromptProps) {
+async function downloadNotebookPdf({
+  folderTitle,
+  notebookMaterial,
+  pages,
+  strokes,
+}: {
+  folderTitle: string;
+  notebookMaterial: FolderMaterial;
+  pages: ArchivedPage[];
+  strokes: HighlightStroke[];
+}) {
+  if (!pages.length) return false;
+  await document.fonts.ready;
+  const documentCopy = await PDFDocument.create();
+  const canvas = document.createElement("canvas");
+  canvas.width = PDF_WIDTH;
+  canvas.height = PDF_HEIGHT;
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) return false;
+  await drawNotebookCover(context, folderTitle, notebookMaterial);
+  const coverPng = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Unable to render the notebook cover.")), "image/png");
+  });
+  const coverBytes = new Uint8Array(await coverPng.arrayBuffer());
+  const coverImage = await documentCopy.embedPng(coverBytes);
+  const coverPage = documentCopy.addPage([595.28, 841.89]);
+  coverPage.drawImage(coverImage, { height: coverPage.getHeight(), width: coverPage.getWidth(), x: 0, y: 0 });
+  for (const [index, page] of pages.entries()) {
+    renderJournalPage(context, {
+      page,
+      pageNumber: index + 2,
+      strokes,
+      tone: "fresh",
+    });
+    const png = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Unable to render this journal page.")), "image/png");
+    });
+    const bytes = new Uint8Array(await png.arrayBuffer());
+    const image = await documentCopy.embedPng(bytes);
+    const pdfPage = documentCopy.addPage([595.28, 841.89]);
+    pdfPage.drawImage(image, { height: pdfPage.getHeight(), width: pdfPage.getWidth(), x: 0, y: 0 });
+  }
+  const safeTitle = folderTitle
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "field-notes";
+  const pdfBytes = await documentCopy.save();
+  const pdfBuffer = pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength) as ArrayBuffer;
+  const fileUrl = URL.createObjectURL(new Blob([pdfBuffer], { type: "application/pdf" }));
+  const download = document.createElement("a");
+  download.href = fileUrl;
+  download.download = `${safeTitle}.pdf`;
+  download.hidden = true;
+  document.body.appendChild(download);
+  download.click();
+  window.setTimeout(() => {
+    download.remove();
+    URL.revokeObjectURL(fileUrl);
+  }, 120_000);
+  return true;
+}
+
+export async function downloadJournalSnapshot({
+  folderTitle,
+  notebookMaterial,
+  snapshot,
+}: {
+  folderTitle: string;
+  notebookMaterial: FolderMaterial;
+  snapshot: JournalSnapshot;
+}) {
+  const allStrokes = await loadHighlightStrokes().catch(() => [] as HighlightStroke[]);
+  const pageIds = new Set([...snapshot.pages.map((page) => page.id), snapshot.currentId]);
+  const strokes = allStrokes.filter((stroke) => pageIds.has(stroke.pageId));
+  const pages = [
+    ...snapshot.pages.filter((page) => page.text.trim() || strokes.some((stroke) => stroke.pageId === page.id)),
+    ...(snapshot.current.trim() || strokes.some((stroke) => stroke.pageId === snapshot.currentId)
+      ? [{ id: snapshot.currentId, slot: snapshot.pages.length % pagePlacements.length, text: snapshot.current.trimEnd() }]
+      : []),
+  ];
+  return downloadNotebookPdf({ folderTitle, notebookMaterial, pages, strokes });
+}
+
+export async function countMeaningfulJournalPages(snapshot: JournalSnapshot) {
+  const allStrokes = await loadHighlightStrokes().catch(() => [] as HighlightStroke[]);
+  const pageIds = new Set([...snapshot.pages.map((page) => page.id), snapshot.currentId]);
+  const strokes = allStrokes.filter((stroke) => pageIds.has(stroke.pageId));
+  return snapshot.pages.filter((page) => page.text.trim() || strokes.some((stroke) => stroke.pageId === page.id)).length
+    + Number(Boolean(snapshot.current.trim() || strokes.some((stroke) => stroke.pageId === snapshot.currentId)));
+}
+
+export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kraft", onArchiveNotebook, onHome, onJournalChange, promptText }: JournalPromptProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const paperRef = useRef<HTMLDivElement | null>(null);
   const pickedUpPaperRef = useRef<HTMLDivElement | null>(null);
@@ -891,6 +1020,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   const editedPageRef = useRef<string | null>(null);
   const paperSwitchRef = useRef(0);
   const deskArrangeTimerRef = useRef<number | null>(null);
+  const markerVisibilityTimerRef = useRef<number | null>(null);
   const soundRef = useRef<ReturnType<typeof createDeskSound> | null>(null);
   const reducedMotion = useReducedMotion();
   const [promptIndex] = useState(() => daySeed() % prompts.length);
@@ -911,6 +1041,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       return true;
     }
   });
+  const [highlighterRendered, setHighlighterRendered] = useState(highlighterVisible);
   const [activeArchivedId, setActiveArchivedId] = useState<string | null>(null);
   const [returningPaperId, setReturningPaperId] = useState<string | null>(null);
   const [exportPageIndex, setExportPageIndex] = useState(0);
@@ -937,6 +1068,12 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   useEffect(() => {
     const timer = window.setTimeout(() => setInitialDeskEntry(false), 2400);
     return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => () => {
+    if (markerVisibilityTimerRef.current !== null) {
+      window.clearTimeout(markerVisibilityTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -986,10 +1123,20 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
 
   const toggleHighlighterVisibility = () => {
     const nextVisible = !highlighterVisible;
+    if (markerVisibilityTimerRef.current !== null) {
+      window.clearTimeout(markerVisibilityTimerRef.current);
+      markerVisibilityTimerRef.current = null;
+    }
     if (!nextVisible) {
       if (highlighterActive) soundRef.current?.markerClose();
       setHighlighterActive(false);
       window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+      markerVisibilityTimerRef.current = window.setTimeout(() => {
+        setHighlighterRendered(false);
+        markerVisibilityTimerRef.current = null;
+      }, 480);
+    } else {
+      setHighlighterRendered(true);
     }
     setHighlighterVisible(nextVisible);
     try {
@@ -1060,7 +1207,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
         { transform: `translate(${x}px, ${y}px) rotate(${origin.rotation}deg) scale(${scale})`, transformOrigin: "50% 50%" },
         { transform: "translate(0, 0) rotate(0deg) scale(1)", transformOrigin: "50% 50%" },
       ],
-      { duration: 620, easing: "cubic-bezier(0.22, 0.68, 0.18, 1)" },
+      { duration: 410, easing: "cubic-bezier(0.2, 0.82, 0.24, 1)" },
     );
     animation.id = "journal-paper-pickup";
 
@@ -1071,7 +1218,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
         { filter: "blur(2.45px)", opacity: 0.58, offset: 0.5 },
         { filter: "blur(2.1px)", opacity: 0.9 },
       ],
-      { duration: 620, easing: "cubic-bezier(0.22, 0.68, 0.18, 1)", fill: "forwards" },
+      { duration: 410, easing: "cubic-bezier(0.2, 0.82, 0.24, 1)", fill: "forwards" },
     );
     if (liftedShadowAnimation) liftedShadowAnimation.id = "journal-paper-pickup-lifted-shadow";
 
@@ -1095,7 +1242,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           transform: `translate(${settledShadow.x * 2.4}px, ${settledShadow.y * 2.4}px) scale(0.99)`,
         },
       ],
-      { duration: 620, easing: "cubic-bezier(0.22, 0.68, 0.18, 1)", fill: "forwards" },
+      { duration: 410, easing: "cubic-bezier(0.2, 0.82, 0.24, 1)", fill: "forwards" },
     );
     if (contactShadowAnimation) contactShadowAnimation.id = "journal-paper-pickup-contact-shadow";
 
@@ -1143,7 +1290,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
         { transform: "translate(0, 0) rotate(0deg) scale(1)", transformOrigin: "50% 50%" },
         { transform: `translate(${x}px, ${y}px) rotate(${origin.rotation}deg) scale(${scale})`, transformOrigin: "50% 50%" },
       ],
-      { duration: 620, easing: "cubic-bezier(0.2, 0.72, 0.22, 1)", fill: "forwards" },
+      { duration: 300, easing: "cubic-bezier(0.2, 0.86, 0.22, 1)", fill: "forwards" },
     );
     paperAnimation.id = "journal-paper-return";
 
@@ -1156,7 +1303,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           { filter: "blur(2.85px)", opacity: 0.24, offset: 0.84 },
           { filter: "blur(3.1px)", opacity: 0 },
         ],
-        { duration: 620, easing: "cubic-bezier(0.2, 0.72, 0.22, 1)", fill: "forwards" },
+        { duration: 300, easing: "cubic-bezier(0.2, 0.86, 0.22, 1)", fill: "forwards" },
       );
       liftedShadowAnimation.id = "journal-paper-return-lifted-shadow";
     }
@@ -1188,7 +1335,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
             transform: `translate(${settledShadow.x}px, ${settledShadow.y}px) scale(1)`,
           },
         ],
-        { duration: 620, easing: "cubic-bezier(0.2, 0.72, 0.22, 1)", fill: "forwards" },
+        { duration: 300, easing: "cubic-bezier(0.2, 0.86, 0.22, 1)", fill: "forwards" },
       );
       contactShadowAnimation.id = "journal-paper-return-contact-shadow";
     }
@@ -1198,7 +1345,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       // Let the contact frame paint before swapping the moving sheet for its
       // desk representation. Without this hold React can commit the handoff
       // in the same frame as the final shadow keyframe.
-      settleTimer = window.setTimeout(finish, 70);
+      settleTimer = window.setTimeout(finish, 12);
     }).catch(() => {
       if (!cancelled) finish();
     });
@@ -1386,7 +1533,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
               transform: `translate(${x}px, ${y}px) rotate(${targetPose.rotation}deg) scale(${scale})`,
             },
           ],
-          { duration: 620, easing: "cubic-bezier(0.18, 0.78, 0.22, 1)", fill: "forwards" },
+          { duration: 390, easing: "cubic-bezier(0.2, 0.84, 0.22, 1)", fill: "forwards" },
         );
         movement.id = "journal-page-lift-and-place";
 
@@ -1398,11 +1545,11 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
               { filter: "blur(5px)", opacity: 0.36, offset: 0.16, transform: "translate(5px, 9px) scale(0.985)" },
               { filter: "blur(2.8px)", opacity: 0.25, transform: "translate(2px, 4px) scale(0.995)" },
             ],
-            { duration: 620, easing: "cubic-bezier(0.18, 0.78, 0.22, 1)", fill: "forwards" },
+            { duration: 390, easing: "cubic-bezier(0.2, 0.84, 0.22, 1)", fill: "forwards" },
           );
         }
 
-        fallback = window.setTimeout(finish, 780);
+        fallback = window.setTimeout(finish, 500);
         void movement.finished.then(finish).catch(finish);
       });
     });
@@ -1431,9 +1578,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       if (event.key !== "Escape") return;
       if (document.querySelector(".journal-prompt__export-viewer")) {
         setExportPreviewOpen(false);
-        return;
       }
-      onClose();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => {
@@ -1443,7 +1588,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [onClose]);
+  }, []);
 
   useEffect(() => () => {
     if (deskArrangeTimerRef.current !== null) window.clearTimeout(deskArrangeTimerRef.current);
@@ -1582,7 +1727,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
         { filter: "brightness(1.008)", opacity: 1, transform: "translateY(-1.5px) rotate(-0.025deg)", offset: 0.32 },
         { filter: "brightness(0.985)", opacity: 0.88, transform: "translateY(30px) rotate(0.08deg)" },
       ],
-      { duration: 240, easing: "cubic-bezier(0.38, 0.04, 0.56, 1)", fill: "forwards" },
+      { duration: 170, easing: "cubic-bezier(0.32, 0.02, 0.5, 1)", fill: "forwards" },
     );
     animation.id = "journal-paper-switch-out";
     let committed = false;
@@ -1592,7 +1737,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       window.clearTimeout(fallback);
       commitSwitch();
     };
-    const fallback = window.setTimeout(finishSwitch, 320);
+    const fallback = window.setTimeout(finishSwitch, 230);
     void animation.finished.then(finishSwitch).catch(finishSwitch);
   };
 
@@ -1676,56 +1821,19 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     setPageCycle((current) => current + 1);
   };
 
+  const clearCurrentPageHighlights = () => {
+    const pageId = activeArchivedId ?? livePageId;
+    setHighlightStrokes((current) => current.filter((stroke) => stroke.pageId !== pageId));
+    void removePageHighlights(pageId);
+  };
+
   const downloadEntry = useCallback(async () => {
-    if (!exportSheets.length) return;
-    await document.fonts.ready;
-    const documentCopy = await PDFDocument.create();
-    const canvas = document.createElement("canvas");
-    canvas.width = PDF_WIDTH;
-    canvas.height = PDF_HEIGHT;
-    const context = canvas.getContext("2d", { alpha: false });
-    if (!context) return;
-    await drawNotebookCover(context, folderTitle ?? "Field notes", notebookMaterial);
-    const coverPng = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Unable to render the notebook cover.")), "image/png");
+    await downloadNotebookPdf({
+      folderTitle: folderTitle ?? prompt,
+      notebookMaterial,
+      pages: exportSheets,
+      strokes: highlightStrokes,
     });
-    const coverBytes = new Uint8Array(await coverPng.arrayBuffer());
-    const coverImage = await documentCopy.embedPng(coverBytes);
-    const coverPage = documentCopy.addPage([595.28, 841.89]);
-    coverPage.drawImage(coverImage, { height: coverPage.getHeight(), width: coverPage.getWidth(), x: 0, y: 0 });
-    for (const [index, page] of exportSheets.entries()) {
-      renderJournalPage(context, {
-        page,
-        pageNumber: index + 2,
-        strokes: highlightStrokes,
-        tone: "fresh",
-      });
-      const png = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Unable to render this journal page.")), "image/png");
-      });
-      const bytes = new Uint8Array(await png.arrayBuffer());
-      const image = await documentCopy.embedPng(bytes);
-      const pdfPage = documentCopy.addPage([595.28, 841.89]);
-      pdfPage.drawImage(image, { height: pdfPage.getHeight(), width: pdfPage.getWidth(), x: 0, y: 0 });
-    }
-    const safePrompt = (folderTitle ?? prompt)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 48) || "field-notes";
-    const pdfBytes = await documentCopy.save();
-    const pdfBuffer = pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength) as ArrayBuffer;
-    const fileUrl = URL.createObjectURL(new Blob([pdfBuffer], { type: "application/pdf" }));
-    const download = document.createElement("a");
-    download.href = fileUrl;
-    download.download = `${safePrompt}.pdf`;
-    download.hidden = true;
-    document.body.appendChild(download);
-    download.click();
-    window.setTimeout(() => {
-      download.remove();
-      URL.revokeObjectURL(fileUrl);
-    }, 120_000);
   }, [exportSheets, folderTitle, highlightStrokes, notebookMaterial, prompt]);
 
   const bumpPaper = () => {
@@ -1763,7 +1871,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     deskArrangeTimerRef.current = window.setTimeout(() => {
       setDeskArranging(false);
       deskArrangeTimerRef.current = null;
-    }, 980);
+    }, 620);
   };
 
   // The desk is a collection of physical sheets, so editing a sheet must not
@@ -1793,13 +1901,18 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       data-highlighter-active={highlighterActive}
       onClick={(event) => {
         if (!activeArchivedPage || !(event.target instanceof Element)) return;
-        if (event.target.closest(".journal-prompt__paper, .journal-prompt__tools, .journal-prompt__archived-page, .journal-prompt__marker-station")) return;
+        if (event.target.closest(".journal-prompt__back, .journal-prompt__paper, .journal-prompt__tools, .journal-prompt__archived-page, .journal-prompt__marker-station")) return;
         returnToLivePage();
       }}
       role="dialog"
       aria-modal="true"
       aria-label={`${folderTitle ?? "Journal"} writing desk`}
     >
+      {onHome ? (
+        <button aria-label="Back to notebook cover" className="journal-prompt__back" data-help="Back to cover" onClick={onHome} type="button">
+          <ArrowLeftIcon aria-hidden="true" size={21} />
+        </button>
+      ) : null}
       <JournalDeskSurface
         archivedCount={pages.length}
         interactionActive={Boolean(draggingPageId)}
@@ -2030,7 +2143,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 "--page-shadow-x": `${deskShadow.x.toFixed(2)}px`,
                 "--page-shadow-y": `${deskShadow.y.toFixed(2)}px`,
                 "--page-tidy-mobile-x": `${tidyMobileX}px`,
-                "--page-tidy-delay": `${Math.min(visibleIndex * 26, 156)}ms`,
+                "--page-tidy-delay": `${Math.min(visibleIndex * 14, 84)}ms`,
                 "--page-tidy-rotation": tidyRotation,
                 "--page-tidy-shadow-x": `${tidyShadow.x.toFixed(2)}px`,
                 "--page-tidy-shadow-y": `${tidyShadow.y.toFixed(2)}px`,
@@ -2038,7 +2151,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 "--page-tidy-y": `${tidyY}px`,
                 "--page-x": `calc(${placement.x} + ${scatter.x.toFixed(2)}vw)`,
                 "--page-y": `calc(${placement.y} + ${scatter.y.toFixed(2)}vh)`,
-                "--page-entry-delay": `${Math.max(0, pageIndex - 3) * 70}ms`,
+                "--page-entry-delay": `${Math.max(0, pageIndex - 3) * 45}ms`,
                 viewTransitionName: pageIndex < 3 ? `field-note-page-${pageIndex + 1}` : "none",
               } as React.CSSProperties}
             >
@@ -2067,7 +2180,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           <div
             className="journal-prompt__paper-stack journal-prompt__paper-stack--live"
             data-covered={Boolean(activeArchivedPage) && !returningPaperId}
-            data-initial-entry={initialDeskEntry}
+            data-initial-entry={pageCycle === 0 ? "true" : undefined}
             data-page-number={String(meaningfulPages.length + 1).padStart(2, "0")}
             key={`live-${pageCycle}`}
             ref={paperRef}
@@ -2185,62 +2298,59 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           ) : null}
         </div>
 
-        {highlighterVisible ? <div className="journal-prompt__marker-station" data-active={highlighterActive}>
-            <button
-              aria-label="Highlighter"
-              aria-pressed={highlighterActive}
-              className="journal-prompt__marker"
-              onClick={() => {
-                const nextActive = !highlighterActive;
-                if (nextActive) soundRef.current?.markerOpen();
-                else soundRef.current?.markerClose();
-                setHighlighterActive(nextActive);
-                if (nextActive) textareaRef.current?.blur();
-                if (!nextActive) window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
-              }}
-              type="button"
-            >
-              <span aria-hidden="true" className="journal-prompt__marker-figure">
-                <i className="journal-prompt__marker-contact-shadow" />
-                <img alt="" className="journal-prompt__marker-capped" draggable="false" src="/assets/tools/journal-mini-highlighter-capped-v1.png" />
-                <img alt="" className="journal-prompt__marker-body" draggable="false" src="/assets/tools/journal-mini-highlighter-body-v1.png" />
-                <img alt="" className="journal-prompt__marker-cap" draggable="false" src="/assets/tools/journal-mini-highlighter-cap-v1.png" />
-              </span>
-            </button>
-        </div> : null}
+        {highlighterRendered ? (
+          <PhysicalHighlighter
+            active={highlighterActive}
+            initialEntry={initialDeskEntry}
+            onToggle={() => {
+              const nextActive = !highlighterActive;
+              if (nextActive) soundRef.current?.markerOpen();
+              else soundRef.current?.markerClose();
+              setHighlighterActive(nextActive);
+              if (nextActive) textareaRef.current?.blur();
+              if (!nextActive) window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+            }}
+            visible={highlighterVisible}
+          />
+        ) : null}
 
-        <div className="journal-prompt__tools" aria-label="Writing tools" role="toolbar">
+        {activeArchivedPage || deletedPage || onArchiveNotebook ? <div className="journal-prompt__page-tools" aria-label="Page tools" role="toolbar">
           {activeArchivedPage ? (
             <>
-              <button aria-label="Return to current page" onClick={returnToLivePage} type="button"><ArrowUUpLeftIcon aria-hidden="true" size={17} />Current page</button>
-              <button aria-label="Delete this page" onClick={deleteActivePage} type="button"><TrashIcon aria-hidden="true" size={17} />Delete page</button>
+              <button aria-label="Return to current page" onClick={returnToLivePage} title="Current page" type="button"><ArrowUUpLeftIcon aria-hidden="true" size={17} />Current page</button>
+              <button aria-label="Delete this page" onClick={deleteActivePage} title="Delete page" type="button"><TrashIcon aria-hidden="true" size={17} />Delete page</button>
             </>
           ) : deletedPage ? (
-            <button aria-label="Undo deleted page" onClick={undoDelete} type="button"><ArrowCounterClockwiseIcon aria-hidden="true" size={17} />Undo delete</button>
+            <button aria-label="Undo deleted page" onClick={undoDelete} title="Undo delete" type="button"><ArrowCounterClockwiseIcon aria-hidden="true" size={17} />Undo delete</button>
           ) : null}
-          <button
-            aria-label={highlighterVisible ? "Hide highlighter" : "Show highlighter"}
-            aria-pressed={!highlighterVisible}
-            onClick={toggleHighlighterVisibility}
-            type="button"
-          >
-            {highlighterVisible ? <EyeSlashIcon aria-hidden="true" size={17} /> : <HighlighterIcon aria-hidden="true" size={17} />}
-            {highlighterVisible ? "Hide marker" : "Show marker"}
-          </button>
-          <button
-            aria-label={deskTidy ? "Tidy and realign pages again" : "Arrange pages into a tidy desk"}
-            aria-pressed={deskTidy}
-            disabled={!pages.length}
-            onClick={toggleDeskOrder}
-            type="button"
-          >
-            <SquaresFourIcon aria-hidden="true" size={17} />
-            {deskTidy ? "Re-tidy desk" : "Tidy desk"}
-          </button>
-          <button disabled={!exportSheets.length} onClick={() => { setExportPageIndex(0); setExportTurningIndex(null); setExportPreviewOpen(true); }} type="button"><DownloadSimpleIcon aria-hidden="true" size={17} />Keep a copy</button>
-          {onRenameNotebook ? <button aria-label="Rename notebook" onClick={onRenameNotebook} type="button"><PencilSimpleIcon aria-hidden="true" size={17} />Rename</button> : null}
-          {onArchiveNotebook ? <button aria-label="Archive notebook" onClick={onArchiveNotebook} type="button"><ArchiveIcon aria-hidden="true" size={17} />Archive</button> : null}
-          <button aria-label="Close journal" className="journal-prompt__close" onClick={onClose} type="button"><XIcon aria-hidden="true" size={17} weight="bold" /></button>
+          {onArchiveNotebook ? <button aria-label="Archive notebook" onClick={onArchiveNotebook} title="Archive notebook" type="button"><ArchiveIcon aria-hidden="true" size={17} />Archive</button> : null}
+        </div> : null}
+
+        <div className="journal-prompt__tools" aria-label="Writing tools">
+          <div className="journal-prompt__tool-menu" role="toolbar">
+            <button
+              aria-label="Clear highlights on this page"
+              data-help="Clear highlights"
+              data-tool="clear"
+              disabled={!highlightStrokes.some((stroke) => stroke.pageId === (activeArchivedId ?? livePageId))}
+              onClick={clearCurrentPageHighlights}
+              type="button"
+            >
+              <EraserIcon aria-hidden="true" size={18} />
+            </button>
+            <button
+              aria-label={deskTidy ? "Tidy and realign pages again" : "Arrange pages into a tidy desk"}
+              aria-pressed={deskTidy}
+              data-help={deskTidy ? "Re-tidy pages" : "Tidy desk"}
+              data-tool="tidy"
+              disabled={!pages.length}
+              onClick={toggleDeskOrder}
+              type="button"
+            >
+              <SquaresFourIcon aria-hidden="true" size={18} />
+            </button>
+            <button aria-label="Keep a copy" data-help="Keep a copy" data-tool="keep" disabled={!exportSheets.length} onClick={() => { setExportPageIndex(0); setExportTurningIndex(null); setExportPreviewOpen(true); }} type="button"><HugeiconsIcon aria-hidden="true" color="currentColor" icon={BookCopyIcon} size={18} strokeWidth={1.5} /></button>
+          </div>
         </div>
       </main>
 

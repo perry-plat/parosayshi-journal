@@ -99,11 +99,11 @@ function canvasTextLines(context: CanvasRenderingContext2D, text: string, maxWid
   return lines;
 }
 
-function paintPaper(context: CanvasRenderingContext2D, pageId: string, tone: "archived" | "fresh") {
+function paintPaper(context: CanvasRenderingContext2D, pageId: string) {
   const paper = context.createLinearGradient(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
-  paper.addColorStop(0, tone === "fresh" ? "#fbfaf6" : "#f5f3ed");
-  paper.addColorStop(0.62, tone === "fresh" ? "#f8f6f0" : "#efede7");
-  paper.addColorStop(1, tone === "fresh" ? "#f0ede6" : "#e7e3db");
+  paper.addColorStop(0, "#ffffff");
+  paper.addColorStop(0.62, "#fefefe");
+  paper.addColorStop(1, "#fafafa");
   context.fillStyle = paper;
   context.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
 
@@ -355,7 +355,7 @@ export function renderJournalPage(context: CanvasRenderingContext2D, options: Re
   context.save();
   context.setTransform(scaleX, 0, 0, scaleY, 0, 0);
   context.clearRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
-  paintPaper(context, page.id, tone);
+  paintPaper(context, page.id);
   paintText(context, page, pageNumber, showIndex, tone);
   strokes.filter((stroke) => stroke.pageId === page.id).forEach((stroke) => drawHighlightStroke(context, stroke));
   context.restore();
