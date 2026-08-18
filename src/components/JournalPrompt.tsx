@@ -866,6 +866,28 @@ export function PhysicalHighlighter({ active, className = "", initialEntry = fal
   );
 }
 
+function PhysicalEraser({ onPutDown }: { onPutDown: () => void }) {
+  return (
+    <div className="journal-prompt__eraser-station">
+      <button
+        aria-label="Put eraser down"
+        className="journal-prompt__physical-eraser"
+        onClick={(event) => {
+          event.stopPropagation();
+          onPutDown();
+        }}
+        type="button"
+      >
+        <img
+          alt=""
+          draggable="false"
+          src={assetPath("assets/tools/journal-chisel-eraser-v1.png")}
+        />
+      </button>
+    </div>
+  );
+}
+
 async function downloadNotebookPdf({
   folderTitle,
   pages,
@@ -1864,7 +1886,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       data-highlighter-active={highlighterActive}
       onClick={(event) => {
         if (!activeArchivedPage || !(event.target instanceof Element)) return;
-        if (event.target.closest(".journal-prompt__paper, .journal-prompt__tools, .journal-prompt__archived-page, .journal-prompt__marker-station")) return;
+        if (event.target.closest(".journal-prompt__paper, .journal-prompt__tools, .journal-prompt__archived-page, .journal-prompt__marker-station, .journal-prompt__eraser-station")) return;
         returnToLivePage();
       }}
       role="dialog"
@@ -2275,6 +2297,15 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           />
         ) : null}
 
+        {eraserActive ? (
+          <PhysicalEraser
+            onPutDown={() => {
+              setEraserActive(false);
+              window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+            }}
+          />
+        ) : null}
+
         {activeArchivedPage || deletedPage || onArchiveNotebook ? <div className="journal-prompt__page-tools" aria-label="Page tools" role="toolbar">
           {activeArchivedPage ? (
             <>
@@ -2298,9 +2329,9 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           ) : null}
           <div className="journal-prompt__tool-menu" role="toolbar">
             <button
-              aria-label={eraserActive ? "Put object eraser down" : "Erase individual highlights"}
+              aria-label={eraserActive ? "Stop erasing" : "Erase highlights"}
               aria-pressed={eraserActive}
-              data-help={eraserActive ? "Put eraser down" : "Object eraser"}
+              data-help={eraserActive ? "Stop erasing" : "Erase"}
               data-tool="eraser"
               disabled={!eraserActive && !highlightStrokes.some((stroke) => stroke.pageId === (activeArchivedId ?? livePageId))}
               onClick={() => {
