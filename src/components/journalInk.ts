@@ -300,7 +300,7 @@ function traceChiselStroke(context: CanvasRenderingContext2D, stroke: HighlightS
   }
 }
 
-export function drawHighlightStroke(context: CanvasRenderingContext2D, stroke: HighlightStroke) {
+export function drawHighlightStroke(context: CanvasRenderingContext2D, stroke: HighlightStroke, opacity = 1) {
   if (stroke.brushVersion !== 1 || stroke.points.length < 2) return;
   context.save();
   context.globalCompositeOperation = "multiply";
@@ -309,12 +309,12 @@ export function drawHighlightStroke(context: CanvasRenderingContext2D, stroke: H
   context.clip();
 
   context.fillStyle = renderedHighlightColor(stroke.color);
-  context.globalAlpha = 0.28;
+  context.globalAlpha = 0.28 * opacity;
   traceChiselStroke(context, stroke);
   context.fill();
 
   const smoothedPoints = smoothChiselPoints(stroke.points);
-  context.globalAlpha = 0.09;
+  context.globalAlpha = 0.09 * opacity;
   traceEndpointPool(
     context,
     smoothedPoints[0],
@@ -326,11 +326,11 @@ export function drawHighlightStroke(context: CanvasRenderingContext2D, stroke: H
   );
   context.fill();
 
-  context.globalAlpha = 0.065;
+  context.globalAlpha = 0.065 * opacity;
   traceChiselDeposit(context, smoothedPoints[0], stroke.width * 0.98, stroke.angle);
   context.fill();
 
-  context.globalAlpha = 0.13;
+  context.globalAlpha = 0.13 * opacity;
   traceEndpointPool(
     context,
     smoothedPoints.at(-1)!,
@@ -342,7 +342,7 @@ export function drawHighlightStroke(context: CanvasRenderingContext2D, stroke: H
   );
   context.fill();
 
-  context.globalAlpha = 0.085;
+  context.globalAlpha = 0.085 * opacity;
   traceChiselDeposit(context, smoothedPoints.at(-1)!, stroke.width * 1.02, stroke.angle, 0.14);
   context.fill();
   context.restore();
@@ -399,6 +399,71 @@ export async function persistHighlightStroke(stroke: HighlightStroke) {
       reject(transaction.error ?? new Error("Unable to file this highlight locally."));
     };
   });
+}
+
+export async function removeHighlightStrokes(strokeIds: string[]) {
+  if (!strokeIds.length) return;
+  const database = await openInkDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(INK_STORE, "readwrite");
+    const store = transaction.objectStore(INK_STORE);
+    strokeIds.forEach((strokeId) => store.delete(strokeId));
+    transaction.oncomplete = () => {
+      database.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      database.close();
+      reject(transaction.error ?? new Error("Unable to erase this highlight locally."));
+    };
+  });
+}
+
+function pointToSegmentDistanceSquared(point: ChiselPoint, start: ChiselPoint, end: ChiselPoint) {
+  const segmentX = end.x - start.x;
+  const segmentY = end.y - start.y;
+  const lengthSquared = segmentX * segmentX + segmentY * segmentY;
+  if (lengthSquared === 0) return (point.x - start.x) ** 2 + (point.y - start.y) ** 2;
+  const projection = Math.max(0, Math.min(1,
+    ((point.x - start.x) * segmentX + (point.y - start.y) * segmentY) / lengthSquared,
+  ));
+  const closestX = start.x + projection * segmentX;
+  const closestY = start.y + projection * segmentY;
+  return (point.x - closestX) ** 2 + (point.y - closestY) ** 2;
+}
+
+function segmentsIntersect(aStart: ChiselPoint, aEnd: ChiselPoint, bStart: ChiselPoint, bEnd: ChiselPoint) {
+  const cross = (a: ChiselPoint, b: ChiselPoint, c: ChiselPoint) =>
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const aSideStart = cross(aStart, aEnd, bStart);
+  const aSideEnd = cross(aStart, aEnd, bEnd);
+  const bSideStart = cross(bStart, bEnd, aStart);
+  const bSideEnd = cross(bStart, bEnd, aEnd);
+  return aSideStart * aSideEnd <= 0 && bSideStart * bSideEnd <= 0;
+}
+
+export function highlightStrokeIntersectsSegment(
+  stroke: HighlightStroke,
+  start: ChiselPoint,
+  end: ChiselPoint,
+  eraserRadius = 12,
+) {
+  if (stroke.points.length < 2) return false;
+  const points = smoothChiselPoints(stroke.points);
+  const hitRadiusSquared = (eraserRadius + stroke.width / 2) ** 2;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const strokeStart = points[index];
+    const strokeEnd = points[index + 1];
+    if (segmentsIntersect(start, end, strokeStart, strokeEnd)) return true;
+    const distanceSquared = Math.min(
+      pointToSegmentDistanceSquared(start, strokeStart, strokeEnd),
+      pointToSegmentDistanceSquared(end, strokeStart, strokeEnd),
+      pointToSegmentDistanceSquared(strokeStart, start, end),
+      pointToSegmentDistanceSquared(strokeEnd, start, end),
+    );
+    if (distanceSquared <= hitRadiusSquared) return true;
+  }
+  return false;
 }
 
 export async function removePageHighlights(pageId: string) {

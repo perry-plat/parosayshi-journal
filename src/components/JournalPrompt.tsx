@@ -16,6 +16,7 @@ import {
   PDF_HEIGHT,
   PDF_WIDTH,
   persistHighlightStroke,
+  removeHighlightStrokes,
   removePageHighlights,
   renderJournalPage,
   type HighlightStroke,
@@ -972,6 +973,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   const [pages, setPages] = useState(initialEntry.pages);
   const [highlightStrokes, setHighlightStrokes] = useState<HighlightStroke[]>([]);
   const [highlighterActive, setHighlighterActive] = useState(false);
+  const [eraserActive, setEraserActive] = useState(false);
   const [highlighterVisible, setHighlighterVisible] = useState(() => {
     try {
       return window.localStorage.getItem(`${storageKey}:highlighter-visible`) !== "false";
@@ -1038,16 +1040,17 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
 
   useEffect(() => {
     const deactivate = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || !highlighterActive) return;
+      if (event.key !== "Escape" || (!highlighterActive && !eraserActive)) return;
       event.preventDefault();
       event.stopPropagation();
-      soundRef.current?.markerClose();
+      if (highlighterActive) soundRef.current?.markerClose();
       setHighlighterActive(false);
+      setEraserActive(false);
       window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
     };
     window.addEventListener("keydown", deactivate, true);
     return () => window.removeEventListener("keydown", deactivate, true);
-  }, [highlighterActive]);
+  }, [eraserActive, highlighterActive]);
 
   const commitHighlight = useCallback((stroke: HighlightStroke) => {
     setHighlightStrokes((current) => [...current, stroke]);
@@ -1059,6 +1062,26 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     };
     save(0);
   }, []);
+
+  const eraseHighlights = useCallback((strokeIds: string[]) => {
+    if (!strokeIds.length) return;
+    const erasedIds = new Set(strokeIds);
+    const pageId = activeArchivedId ?? livePageId;
+    const hasRemainingInk = highlightStrokes.some((stroke) =>
+      stroke.pageId === pageId && !erasedIds.has(stroke.id),
+    );
+    setHighlightStrokes((current) => current.filter((stroke) => !erasedIds.has(stroke.id)));
+    const remove = (attempt: number) => {
+      void removeHighlightStrokes(strokeIds).catch(() => {
+        if (attempt < 5) window.setTimeout(() => remove(attempt + 1), Math.min(8000, 500 * 2 ** attempt));
+      });
+    };
+    remove(0);
+    if (!hasRemainingInk) {
+      setEraserActive(false);
+      window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+    }
+  }, [activeArchivedId, highlightStrokes, livePageId]);
 
   const soundHighlightWetChange = useCallback((wet: boolean) => {
     if (wet) soundRef.current?.markerStrokeStart();
@@ -1769,12 +1792,6 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     setPageCycle((current) => current + 1);
   };
 
-  const clearCurrentPageHighlights = () => {
-    const pageId = activeArchivedId ?? livePageId;
-    setHighlightStrokes((current) => current.filter((stroke) => stroke.pageId !== pageId));
-    void removePageHighlights(pageId);
-  };
-
   const downloadEntry = useCallback(async () => {
     await downloadNotebookPdf({
       folderTitle: folderTitle ?? prompt,
@@ -2169,7 +2186,9 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
               </div>
               <JournalInkLayer
                 active={highlighterActive && !activeArchivedPage}
+                erasing={eraserActive && !activeArchivedPage}
                 onCommit={commitHighlight}
+                onEraseCommit={eraseHighlights}
                 onStrokeMotion={soundHighlightMotion}
                 onWetChange={soundHighlightWetChange}
                 pageId={livePageId}
@@ -2222,7 +2241,9 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 </div>
                 <JournalInkLayer
                   active={highlighterActive && returningPaperId !== activeArchivedPage.id}
+                  erasing={eraserActive && returningPaperId !== activeArchivedPage.id}
                   onCommit={commitHighlight}
+                  onEraseCommit={eraseHighlights}
                   onStrokeMotion={soundHighlightMotion}
                   onWetChange={soundHighlightWetChange}
                   pageId={activeArchivedPage.id}
@@ -2245,6 +2266,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
               const nextActive = !highlighterActive;
               if (nextActive) soundRef.current?.markerOpen();
               else soundRef.current?.markerClose();
+              if (nextActive) setEraserActive(false);
               setHighlighterActive(nextActive);
               if (nextActive) textareaRef.current?.blur();
               if (!nextActive) window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
@@ -2276,11 +2298,19 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           ) : null}
           <div className="journal-prompt__tool-menu" role="toolbar">
             <button
-              aria-label="Clear highlights on this page"
-              data-help="Clear highlights"
-              data-tool="clear"
-              disabled={!highlightStrokes.some((stroke) => stroke.pageId === (activeArchivedId ?? livePageId))}
-              onClick={clearCurrentPageHighlights}
+              aria-label={eraserActive ? "Put object eraser down" : "Erase individual highlights"}
+              aria-pressed={eraserActive}
+              data-help={eraserActive ? "Put eraser down" : "Object eraser"}
+              data-tool="eraser"
+              disabled={!eraserActive && !highlightStrokes.some((stroke) => stroke.pageId === (activeArchivedId ?? livePageId))}
+              onClick={() => {
+                const nextActive = !eraserActive;
+                if (nextActive && highlighterActive) soundRef.current?.markerClose();
+                setHighlighterActive(false);
+                setEraserActive(nextActive);
+                if (nextActive) textareaRef.current?.blur();
+                else window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+              }}
               type="button"
             >
               <EraserIcon aria-hidden="true" size={18} />
