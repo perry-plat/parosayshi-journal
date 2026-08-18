@@ -36,6 +36,7 @@ const prompts = [
 ] as const;
 
 const storageKey = "field-notes:journal-drafts";
+const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
 const showPromptCard = false;
 // The journal now has one authored desk rather than a surface gallery. The
 // dormant explorations remain isolated in JournalDeskSurface for later study.
@@ -560,16 +561,16 @@ function createDeskSound() {
   };
 
   const files: Record<SoundName, string> = {
-    "key-1": "/assets/sounds/journal/key-1.wav?v=mechanical-2",
-    "key-2": "/assets/sounds/journal/key-2.wav?v=mechanical-2",
-    "key-3": "/assets/sounds/journal/key-3.wav?v=mechanical-2",
-    "key-4": "/assets/sounds/journal/key-4.wav?v=mechanical-2",
-    space: "/assets/sounds/journal/space.wav?v=mechanical-2",
-    backspace: "/assets/sounds/journal/backspace.wav?v=mechanical-2",
-    "highlighter-close": "/assets/sounds/journal/highlighter-close.wav?v=physical-1",
-    "highlighter-draw": "/assets/sounds/journal/highlighter-draw-loop.wav?v=continuous-1",
-    "highlighter-open": "/assets/sounds/journal/highlighter-open.wav?v=physical-1",
-    return: "/assets/sounds/journal/return.wav?v=mechanical-2",
+    "key-1": assetPath("assets/sounds/journal/key-1.wav?v=mechanical-2"),
+    "key-2": assetPath("assets/sounds/journal/key-2.wav?v=mechanical-2"),
+    "key-3": assetPath("assets/sounds/journal/key-3.wav?v=mechanical-2"),
+    "key-4": assetPath("assets/sounds/journal/key-4.wav?v=mechanical-2"),
+    space: assetPath("assets/sounds/journal/space.wav?v=mechanical-2"),
+    backspace: assetPath("assets/sounds/journal/backspace.wav?v=mechanical-2"),
+    "highlighter-close": assetPath("assets/sounds/journal/highlighter-close.wav?v=physical-1"),
+    "highlighter-draw": assetPath("assets/sounds/journal/highlighter-draw-loop.wav?v=continuous-1"),
+    "highlighter-open": assetPath("assets/sounds/journal/highlighter-open.wav?v=physical-1"),
+    return: assetPath("assets/sounds/journal/return.wav?v=mechanical-2"),
   };
   const regularKeys: SoundName[] = ["key-1", "key-2", "key-3", "key-4"];
   const outputGain = 0.3;
@@ -855,9 +856,9 @@ export function PhysicalHighlighter({ active, className = "", initialEntry = fal
       >
         <span aria-hidden="true" className="journal-prompt__marker-figure">
           <i className="journal-prompt__marker-contact-shadow" />
-          <img alt="" className="journal-prompt__marker-capped" draggable="false" src="/assets/tools/journal-mini-highlighter-capped-v1.png" />
-          <img alt="" className="journal-prompt__marker-body" draggable="false" src="/assets/tools/journal-mini-highlighter-body-v1.png" />
-          <img alt="" className="journal-prompt__marker-cap" draggable="false" src="/assets/tools/journal-mini-highlighter-cap-v1.png" />
+          <img alt="" className="journal-prompt__marker-capped" draggable="false" src={assetPath("assets/tools/journal-mini-highlighter-capped-v1.png")} />
+          <img alt="" className="journal-prompt__marker-body" draggable="false" src={assetPath("assets/tools/journal-mini-highlighter-body-v1.png")} />
+          <img alt="" className="journal-prompt__marker-cap" draggable="false" src={assetPath("assets/tools/journal-mini-highlighter-cap-v1.png")} />
         </span>
       </button>
     </div>

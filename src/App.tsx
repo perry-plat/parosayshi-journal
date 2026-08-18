@@ -293,7 +293,7 @@ function NameNotebook({ initialTitle, material, onContinue, onFreshNotebook, sho
                 ref={slipRef}
               >
                 <div className="product-notebook-name__slip-brand">
-                  <img alt="" src="/assets/brand/parosayshi-wordmark.png" />
+                  <img alt="" src={`${import.meta.env.BASE_URL}assets/brand/parosayshi-wordmark.png`} />
                   <small>@PAROSAYSHI</small>
                 </div>
                 <h1 id="notebook-name-title">Give this notebook a name</h1>
