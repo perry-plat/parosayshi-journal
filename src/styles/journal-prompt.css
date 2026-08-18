@@ -22,6 +22,7 @@
 .archive-garden__journal-entry,
 .journal-prompt {
   --journal-font: "Recursive Variable", "Recursive", sans-serif;
+  --journal-ui-font: "Geist Mono Variable", "Geist Mono", monospace;
   --journal-body-axes: "MONO" 0.28, "CASL" 0.42, "CRSV" 0, "slnt" 0;
   --journal-display-axes: "MONO" 0, "CASL" 0.82, "CRSV" 0.08, "slnt" 0;
   --journal-ui-axes: "MONO" 1, "CASL" 0.08, "CRSV" 0, "slnt" 0;
@@ -57,12 +58,16 @@
 }
 
 .journal-prompt[data-desk-surface="archive-signal"] {
-  background-color: #37332f;
+  background-color: #292826;
   background-image:
-    radial-gradient(circle at center, rgb(244 232 210 / 0.04) 0 0.6px, transparent 0.8px),
-    linear-gradient(rgb(235 220 194 / 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(235 220 194 / 0.025) 1px, transparent 1px);
-  background-size: 13px 13px, 84px 84px, 84px 84px;
+    radial-gradient(circle at center, rgb(232 229 222 / 0.03) 0 .55px, transparent .8px),
+    linear-gradient(rgb(232 229 222 / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(232 229 222 / 0.04) 1px, transparent 1px),
+    linear-gradient(122deg, rgb(255 255 255 / 0.016), transparent 42%, rgb(0 0 0 / 0.14)),
+    url("/assets/textures/paper-fiber-cc0.jpg");
+  background-blend-mode: screen, normal, normal, normal, multiply;
+  background-position: center;
+  background-size: 13px 13px, 84px 84px, 84px 84px, auto, 640px auto;
 }
 
 .journal-prompt__drafting-mat,
@@ -109,6 +114,7 @@
   inset: 0;
   z-index: 4;
   overflow: hidden;
+  mix-blend-mode: multiply;
   pointer-events: none;
 }
 
@@ -119,29 +125,37 @@
   opacity: 0.92;
 }
 
+.journal-prompt > .journal-prompt__dappled-light {
+  animation: journal-dappled-light-arrive 2600ms linear 950ms both;
+  will-change: opacity;
+}
+
 .journal-prompt__close:focus-visible, .journal-prompt__tools button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 
 .journal-prompt__page-field { position: fixed; inset: 0; z-index: 3; overflow: hidden; perspective: 1200px; pointer-events: none; }
-.journal-prompt__archived-page { position: absolute; top: 58%; left: 50%; z-index: var(--page-layer); width: var(--journal-resting-paper-width); height: var(--journal-resting-paper-height); padding: 0; overflow: visible; touch-action: none; user-select: none; isolation: isolate; color: #312e2a; appearance: none; background: #eceae4; border: 0; box-shadow: none; cursor: grab; opacity: 1; pointer-events: auto; text-align: left; transform: translate(calc(-50% + var(--page-x) + var(--page-drag-x)), calc(-50% + var(--page-y) + var(--page-drag-y))) rotate(var(--page-rotation)) scale(var(--page-scale)) translateY(var(--page-lift, 0px)) rotate(var(--page-hover-rotation, 0deg)) rotate(var(--page-drag-rotation, 0deg)) scale(var(--page-hover-scale, 1)); transform-origin: center; transition: filter 220ms ease, transform 330ms cubic-bezier(0.16, 1.16, 0.3, 1); }
+.journal-prompt__archived-page { position: absolute; top: 58%; left: 50%; z-index: var(--page-layer); width: var(--journal-resting-paper-width); height: var(--journal-resting-paper-height); padding: 0; overflow: visible; touch-action: none; user-select: none; isolation: isolate; color: #312e2a; appearance: none; background: #eceae4; border: 0; box-shadow: none; cursor: grab; opacity: 1; pointer-events: auto; text-align: left; transform: translate(calc(-50% + var(--page-x) + var(--page-drag-x)), calc(-50% + var(--page-y) + var(--page-drag-y))) rotate(var(--page-rotation)) scale(var(--page-scale)) translateY(var(--page-lift, 0px)) rotate(var(--page-hover-rotation, 0deg)) rotate(var(--page-drag-rotation, 0deg)) scale(var(--page-hover-scale, 1)); transform-origin: center; transition: opacity 280ms cubic-bezier(0.2, 0.72, 0.22, 1) 35ms, filter 220ms ease, transform 330ms cubic-bezier(0.16, 1.16, 0.3, 1); }
 .journal-prompt__archived-page::before { position: absolute; inset: 0; z-index: 1; background: linear-gradient(128deg, rgb(255 255 255 / 0.12), transparent 38%, rgb(118 102 82 / 0.055)); content: ""; mix-blend-mode: soft-light; pointer-events: none; }
 .journal-prompt__archived-page::after { position: absolute; inset: 0; z-index: 2; box-shadow: inset 0 0 0 1px rgb(58 52 47 / 0.09); content: ""; pointer-events: none; }
 .journal-prompt__archived-shadow { position: absolute; inset: 1px; z-index: -1; display: block; background: linear-gradient(145deg, rgb(7 6 5 / 0.26), rgb(7 6 5 / 0.21) 58%, rgb(7 6 5 / 0.12)); clip-path: polygon(0.3% 0.7%, 16% 0.2%, 39% 0.8%, 63% 0.25%, 84% 0.65%, 99.6% 0.2%, 100% 99.2%, 86% 99.75%, 62% 99.1%, 39% 99.8%, 15% 99.25%, 0.2% 99.7%); filter: blur(2.7px); opacity: 0.52; pointer-events: none; transform: translate(var(--page-shadow-x), var(--page-shadow-y)); transition: filter 160ms ease, opacity 160ms ease; }
 .journal-prompt__archived-page[data-dragging="true"] { --page-hover-scale: 1.014; --page-lift: -8px; z-index: 2147483647; cursor: grabbing; filter: brightness(0.99) saturate(0.9); transition: none; will-change: transform; }
 .journal-prompt__archived-page[data-dragging="true"] .journal-prompt__archived-shadow { filter: blur(3px); opacity: 0.78; }
-.journal-prompt__archived-page[data-active-source="true"] { visibility: hidden; pointer-events: none; }
+.journal-prompt__archived-page[data-initial-entry="true"] { animation: journal-archived-page-entry 560ms cubic-bezier(0.16, 0.76, 0.2, 1) var(--page-entry-delay, 0ms) both; }
+.journal-prompt__archived-page[data-active-source="true"] { opacity: 0; pointer-events: none; }
 .journal-prompt__archived-page:focus-visible { outline: 4px solid #f3f2ed; outline-offset: 8px; }
 .journal-prompt__archived-preview { position: absolute; inset: 0; z-index: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
-.journal-prompt__archived-page-index { position: absolute; top: 10px; left: var(--page-index-x, calc(100% - 10px)); z-index: 4; color: rgb(45 40 35 / 0.72); font-family: var(--journal-font); font-size: 10px; font-weight: 500; font-variation-settings: var(--journal-ui-axes); letter-spacing: 0.08em; line-height: 1; pointer-events: none; transform: translateX(-100%); }
-.journal-prompt__archived-page[data-releasing="true"] { visibility: hidden; pointer-events: none; }
-.journal-prompt[data-desk-tidy="true"] .journal-prompt__archived-page { top: 54px; left: 56%; z-index: var(--page-layer); cursor: grab; opacity: 1; transform: translate(calc(-50% + var(--page-tidy-x) + var(--page-drag-x)), calc(var(--page-tidy-y) + var(--page-drag-y))) rotate(var(--page-tidy-rotation)) scale(0.84) translateY(var(--page-lift, 0px)) rotate(var(--page-hover-rotation, 0deg)) rotate(var(--page-drag-rotation, 0deg)) scale(var(--page-hover-scale, 1)); transform-origin: top center; }
+.journal-prompt__archived-page-index { position: absolute; top: 10px; left: var(--page-index-x, calc(100% - 10px)); z-index: 4; color: rgb(45 40 35 / 0.72); font-family: var(--journal-ui-font); font-size: 11px; font-weight: 400; font-variation-settings: normal; letter-spacing: -.0275em; line-height: 1; pointer-events: none; transform: translateX(-100%); }
+.journal-prompt__archived-page[data-releasing="true"] { opacity: 0; pointer-events: none; }
+.journal-prompt__archived-page[data-return-target="true"] { background: transparent; pointer-events: none; transition: none; }
+.journal-prompt__archived-page[data-return-target="true"]::before,
+.journal-prompt__archived-page[data-return-target="true"]::after { content: none; }
+.journal-prompt__archived-page[data-return-target="true"] .journal-prompt__archived-shadow { opacity: 0; }
+.journal-prompt[data-desk-tidy="true"] .journal-prompt__archived-page { z-index: var(--page-layer); cursor: grab; opacity: 1; transform: translate(calc(-50% + 6vw + var(--page-tidy-x) + var(--page-drag-x)), calc(54px - 58vh - 8% + var(--page-tidy-y) + var(--page-drag-y))) rotate(var(--page-tidy-rotation)) scale(0.84) translateY(var(--page-lift, 0px)) rotate(var(--page-hover-rotation, 0deg)) rotate(var(--page-drag-rotation, 0deg)) scale(var(--page-hover-scale, 1)); }
 .journal-prompt[data-desk-tidy="true"] .journal-prompt__archived-page-index { left: calc(100% - 10px); }
 .journal-prompt[data-desk-tidy="true"] .journal-prompt__archived-shadow { transform: translate(var(--page-tidy-shadow-x), var(--page-tidy-shadow-y)); }
 .journal-prompt[data-desk-tidy="true"] .journal-prompt__archived-page[data-dragging="true"] { z-index: 2147483647; cursor: grabbing; }
 .journal-prompt[data-desk-arranging="true"] .journal-prompt__archived-page {
-  will-change: top, left, transform;
+  will-change: transform;
   transition:
-    top 720ms cubic-bezier(0.22, 0.72, 0.16, 1) var(--page-tidy-delay),
-    left 720ms cubic-bezier(0.22, 0.72, 0.16, 1) var(--page-tidy-delay),
     transform 720ms cubic-bezier(0.22, 0.72, 0.16, 1) var(--page-tidy-delay),
     opacity 260ms ease;
 }
@@ -162,6 +176,12 @@
 .journal-prompt__archived-page:not([data-dragging="true"]):hover .journal-prompt__archived-shadow {
   filter: blur(3.1px);
   opacity: 0.64;
+}
+
+.journal-prompt[data-desk-arranging="true"] .journal-prompt__archived-page:hover {
+  --page-hover-rotation: 0deg;
+  --page-hover-scale: 1;
+  --page-lift: 0px;
 }
 
 .journal-prompt__release-sheet { position: fixed; z-index: 35; isolation: isolate; pointer-events: none; transform-origin: 50% 50%; will-change: filter, transform; }
@@ -197,12 +217,14 @@
   animation: journal-fresh-page 440ms cubic-bezier(0.18, 0.7, 0.22, 1) both;
 }
 
-.journal-prompt__paper-stack--live { z-index: 1; transition: transform 620ms cubic-bezier(0.2, 0.72, 0.22, 1), filter 620ms cubic-bezier(0.2, 0.72, 0.22, 1); }
+.journal-prompt__paper-stack--live { z-index: 3; transition: transform 620ms cubic-bezier(0.2, 0.72, 0.22, 1), filter 620ms cubic-bezier(0.2, 0.72, 0.22, 1); }
+.journal-prompt__paper-stack--live[data-initial-entry="true"] { animation: journal-initial-live-page 980ms cubic-bezier(0.16, 0.76, 0.2, 1) 900ms both; }
 .journal-prompt[data-page-releasing="true"] .journal-prompt__paper-stack--live { animation-delay: 90ms; }
 .journal-prompt__paper-stack--live[data-covered="true"] { animation: none; filter: brightness(0.945); transform: translate(44px, 5px) rotate(1.7deg); }
 .journal-prompt__paper-stack--live[data-covered="true"]::after { position: absolute; top: 28px; right: -24px; z-index: 4; box-sizing: border-box; width: 25px; padding: 10px 7px; color: rgb(255 248 237 / 0.92); background: linear-gradient(90deg, #a84635, #c35b45); border: 1px solid rgb(87 37 29 / 0.34); border-left: 0; border-radius: 0 3px 3px 0; box-shadow: 2px 3px 5px rgb(28 22 18 / 0.16); content: "CURRENT"; font: 600 7px/1 var(--journal-font); font-variation-settings: var(--journal-ui-axes); letter-spacing: 0.1em; pointer-events: none; text-transform: uppercase; white-space: nowrap; writing-mode: vertical-rl; }
 .journal-prompt__paper-stack--picked { z-index: 5; animation: none; backface-visibility: hidden; transform-origin: 50% 100%; will-change: transform; }
 .journal-prompt__paper-shadow--picked { top: -15px; right: 2px; left: -3px; height: 18px; background: linear-gradient(180deg, transparent 0%, rgb(18 14 11 / 0.16) 46%, rgb(18 14 11 / 0.44) 84%, rgb(18 14 11 / 0.54) 100%); clip-path: polygon(0 94%, 5% 68%, 15% 49%, 31% 57%, 49% 39%, 66% 54%, 84% 47%, 95% 70%, 100% 92%, 100% 100%, 0 100%); filter: blur(2.1px); opacity: 0.9; -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
+.journal-prompt__return-contact-shadow { position: absolute; inset: 1px; z-index: 1; display: block; background: linear-gradient(145deg, rgb(7 6 5 / 0.26), rgb(7 6 5 / 0.21) 58%, rgb(7 6 5 / 0.12)); clip-path: polygon(0.3% 0.7%, 16% 0.2%, 39% 0.8%, 63% 0.25%, 84% 0.65%, 99.6% 0.2%, 100% 99.2%, 86% 99.75%, 62% 99.1%, 39% 99.8%, 15% 99.25%, 0.2% 99.7%); filter: blur(5.4px); opacity: 0; pointer-events: none; transform: translate(0, 0) scale(0.99); }
 .journal-prompt__paper-stack--picked .journal-prompt__paper {
   background: linear-gradient(108deg, #f5f3ed 0%, #efede7 62%, #e7e3db 100%);
   box-shadow: inset 0 0 0 1px rgb(128 113 91 / 0.17);
@@ -220,7 +242,7 @@
   width: 100%;
   height: 100%;
   min-height: var(--journal-writing-paper-height);
-  padding: 6.4583cqw 8.75cqw 9.375cqw;
+  padding: 10cqw 12.5cqw 9.375cqw;
   overflow: hidden;
   background: linear-gradient(108deg, #fbfaf6 0%, #f8f6f0 58%, #f0ede6 100%);
   border: 0;
@@ -246,43 +268,49 @@
   filter: blur(2px);
   opacity: 0.9;
   transform: skewX(-0.2deg);
+  transition: filter 520ms cubic-bezier(0.2, 0.72, 0.22, 1), opacity 520ms ease, transform 520ms cubic-bezier(0.2, 0.72, 0.22, 1);
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
 }
+.journal-prompt__paper-stack--live[data-covered="true"] .journal-prompt__paper-shadow--ambient {
+  filter: blur(3px);
+  opacity: 0.58;
+  transform: translate(4px, 3px) skewX(-0.2deg) scaleX(.99);
+}
 
-.journal-prompt__sheet-index { position: absolute; top: 10px; right: 10px; z-index: 2; font-family: var(--journal-font); font-size: 10px; font-weight: 500; font-variation-settings: var(--journal-ui-axes); letter-spacing: 0.08em; }
+.journal-prompt__sheet-index { position: absolute; top: 10px; right: 10px; z-index: 2; font-family: var(--journal-ui-font); font-size: 11px; font-weight: 400; font-variation-settings: normal; letter-spacing: -.0275em; }
 
 .journal-prompt__paper::before,
 .journal-prompt__paper::after { position: absolute; inset: 0; content: ""; pointer-events: none; }
 .journal-prompt__paper::before { background-image: radial-gradient(circle at 28% 31%, rgb(59 52 43 / 0.12) 0 0.45px, transparent 0.7px), radial-gradient(circle at 71% 66%, rgb(255 255 255 / 0.42) 0 0.4px, transparent 0.65px); background-size: 17px 19px, 23px 29px; mix-blend-mode: multiply; opacity: 0.24; }
 .journal-prompt__paper::after { background: var(--noise-image), url("/assets/textures/paper-fiber-cc0.jpg"); background-size: 320px 320px, 620px auto; mix-blend-mode: multiply; opacity: 0.052; }
 .journal-prompt__writing-field { position: relative; z-index: 1; margin: 0; background: none; }
-.journal-prompt__writing-field textarea { display: block; width: 100%; min-height: 4.375cqw; padding: 0; overflow: hidden; resize: none; color: rgb(34 30 27 / 0.94); background: transparent; border: 0; outline: 0; caret-color: #31a75b; filter: contrast(1.035); font-family: var(--journal-font); font-size: 2.5cqw; font-weight: 420; font-variation-settings: var(--journal-body-axes); letter-spacing: -0.03125cqw; line-height: 4.375cqw; text-shadow: 0 0 0.42px rgb(12 9 7 / 0.72), 0.2px 0.18px 0 rgb(22 17 13 / 0.22), -0.12px 0.08px 0 rgb(33 27 22 / 0.14), 0 -0.2px 0 rgb(255 255 255 / 0.12); }
+.journal-prompt__writing-field textarea { display: block; width: 100%; min-height: 2.9cqw; padding: 0; overflow: hidden; resize: none; color: rgb(34 30 27 / 0.86); background: transparent; border: 0; outline: 0; caret-color: #9b8614; filter: none; font-family: var(--journal-ui-font); font-size: 2.08cqw; font-weight: 300; font-variation-settings: normal; letter-spacing: -.012em; line-height: 2.9cqw; text-shadow: none; }
 .journal-prompt__writing-field textarea::placeholder { color: rgb(45 42 41 / 0.28); text-shadow: none; }
 .journal-prompt__ink-layer { position: absolute; inset: 0; z-index: 3; display: block; width: 100%; height: 100%; mix-blend-mode: multiply; pointer-events: none; touch-action: auto; }
-.journal-prompt__ink-layer[data-active="true"] { cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='28'%20height='40'%20viewBox='0%200%2028%2040'%3E%3Cpath%20d='M9%201h13l3%205-4%2025-5%205-11-3-2-5L6%205z'%20fill='%2359d73f'%20stroke='%23133c1b'%20stroke-width='1.5'/%3E%3Cpath%20d='m5%2030%2016%203-3%206-12-2z'%20fill='%23225b2b'%20stroke='%230b2a12'%20stroke-width='1.2'/%3E%3Cpath%20d='M9%205h4L9%2027'%20fill='none'%20stroke='%23c8ffae'%20stroke-opacity='.55'%20stroke-width='2'%20stroke-linecap='round'/%3E%3C/svg%3E") 13 38, default; pointer-events: auto; touch-action: none; }
+.journal-prompt__ink-layer[data-active="true"] { cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='20'%20height='20'%20viewBox='0%200%2020%2020'%3E%3Cpath%20d='M6.2%202.2%2017.4%206.4%2013.2%2016.8%202.4%2012.8z'%20fill='%23ffec25'%20stroke='%23453c0a'%20stroke-width='1.2'%20stroke-linejoin='round'/%3E%3Cpath%20d='m2.4%2012.8%2010.8%204-2.4%202.3L1%2015.5z'%20fill='%2387770d'%20stroke='%23453c0a'%20stroke-width='1.1'%20stroke-linejoin='round'/%3E%3Cpath%20d='m5.9%204.7%207.8%202.9'%20stroke='%23fffbd0'%20stroke-width='1.2'%20stroke-linecap='round'%20opacity='.78'/%3E%3C/svg%3E") 6 17, crosshair; pointer-events: auto; touch-action: none; }
 .journal-prompt__sheet-index { z-index: 5; }
 .journal-prompt__continue-page { z-index: 5; }
 
-.journal-prompt__marker-station { --marker-object-width: 118px; --marker-object-height: 354px; position: fixed; right: auto; bottom: -118px; left: max(24px, calc(50vw - (var(--journal-sheet-width) / 2) - 146px)); z-index: 18; display: grid; width: var(--marker-object-width); height: var(--marker-object-height); pointer-events: auto; }
+.journal-prompt__marker-station { --marker-object-width: 156px; --marker-object-height: 192px; position: fixed; right: auto; bottom: -36px; left: max(14px, calc(50vw - (var(--journal-sheet-width) / 2) - 130px)); z-index: 2; display: grid; width: var(--marker-object-width); height: var(--marker-object-height); animation: journal-marker-enter 800ms cubic-bezier(0.18, 0.7, 0.22, 1) 900ms both; pointer-events: auto; }
 .journal-prompt__marker { position: relative; width: var(--marker-object-width); height: var(--marker-object-height); padding: 0; color: #17391d; appearance: none; background: transparent; border: 0; cursor: pointer; transform-origin: 50% 88%; }
-.journal-prompt__marker-figure { position: relative; display: block; width: var(--marker-object-width); height: var(--marker-object-height); filter: drop-shadow(1px 2px 1px rgb(8 7 6 / 0.36)) drop-shadow(4px 8px 5px rgb(8 7 6 / 0.2)); pointer-events: none; transform: rotate(-12deg); transform-origin: 50% 92%; transition: filter 180ms ease, transform 240ms cubic-bezier(0.2, 0.82, 0.24, 1); }
-.journal-prompt__marker-contact-shadow { position: absolute; bottom: 0.5%; left: 50%; width: 46%; height: 2.8%; background: rgb(8 7 6 / 0.34); border-radius: 50%; filter: blur(2.2px); transform: translate(-42%, 1px); transition: opacity 180ms ease, transform 240ms ease; }
+.journal-prompt__marker-figure { position: relative; display: block; width: var(--marker-object-width); height: var(--marker-object-height); filter: none; pointer-events: none; transform: rotate(21deg); transform-origin: 50% 82%; transition: transform 240ms cubic-bezier(0.2, 0.82, 0.24, 1); }
+.journal-prompt__marker-contact-shadow { display: none; }
 .journal-prompt__marker-capped,
 .journal-prompt__marker-body,
-.journal-prompt__marker-cap { position: absolute; left: 50%; z-index: 1; display: block; width: auto; pointer-events: none; user-select: none; transform: translateX(-50%); transition: opacity 140ms ease, transform 300ms cubic-bezier(0.2, 0.82, 0.24, 1); }
+.journal-prompt__marker-cap { position: absolute; left: 50%; z-index: 1; display: block; width: auto; filter: none; pointer-events: none; user-select: none; transform: translateX(-50%); }
 .journal-prompt__marker-capped { bottom: 0; height: 100%; opacity: 1; transform-origin: 50% 82%; }
-.journal-prompt__marker-body { bottom: 0; height: 94%; opacity: 0; transform-origin: 50% 82%; }
-.journal-prompt__marker-cap { top: 0; z-index: 2; height: 38.5%; opacity: 0; transform-origin: 50% 78%; }
-.journal-prompt__marker:hover .journal-prompt__marker-figure { filter: drop-shadow(1px 2px 1px rgb(8 7 6 / 0.3)) drop-shadow(6px 12px 7px rgb(8 7 6 / 0.24)); transform: translateY(-4px) rotate(-9deg); }
+.journal-prompt__marker-body { bottom: 0; height: 100%; opacity: 0; transform-origin: 50% 82%; }
+.journal-prompt__marker-cap { top: 3%; z-index: 2; width: 88%; height: auto; opacity: 0; transform: translateX(-50%) rotate(8deg); transform-origin: 50% 72%; transition: opacity 110ms ease, transform 300ms cubic-bezier(0.2, 0.82, 0.24, 1); }
+.journal-prompt__marker:hover .journal-prompt__marker-figure { filter: none; transform: translateY(-3px) rotate(21deg); }
 .journal-prompt__marker:focus-visible { outline: 0; }
-.journal-prompt__marker-station[data-active="true"] .journal-prompt__marker-figure { filter: drop-shadow(2px 3px 1px rgb(8 7 6 / 0.26)) drop-shadow(8px 15px 9px rgb(8 7 6 / 0.26)); transform: translate(8px, -9px) rotate(-7deg); }
-.journal-prompt__marker-station[data-active="true"] .journal-prompt__marker-capped { opacity: 0; transform: translate(-50%, -8px) rotate(3deg); }
-.journal-prompt__marker-station[data-active="true"] .journal-prompt__marker-body { opacity: 1; transform: translate(-50%, -8px) translateX(9px) rotate(5deg); }
-.journal-prompt__marker-station[data-active="true"] .journal-prompt__marker-cap { opacity: 1; transform: translate(-50%, 34px) translateX(-56px) rotate(-24deg); }
+.journal-prompt__marker-station[data-active="true"] .journal-prompt__marker-figure { filter: none; transform: translateY(-5px) rotate(21deg); }
+.journal-prompt__marker-station[data-active="true"] .journal-prompt__marker-capped { opacity: 0; }
+.journal-prompt__marker-station[data-active="true"] .journal-prompt__marker-body { opacity: 1; }
+.journal-prompt__marker-station[data-active="true"] .journal-prompt__marker-cap { opacity: 1; transform: translate(-50%, 30px) translateX(-92px) rotate(-42deg); }
 .journal-prompt__marker-station[data-active="true"] .journal-prompt__marker-contact-shadow { opacity: 0.52; transform: translate(-58%, 3px) scaleX(1.12); }
-.journal-prompt__marker:focus-visible .journal-prompt__marker-figure { filter: drop-shadow(0 0 1px #f4f1e5) drop-shadow(0 0 2px #f4f1e5) drop-shadow(5px 10px 6px rgb(8 7 6 / 0.24)); }
-.journal-prompt__continue-page { position: absolute; right: 0; bottom: 0; z-index: 5; display: flex; min-height: 34px; align-items: center; gap: 8px; padding: 9px 13px 10px; color: rgb(42 39 35 / 0.72); background: rgb(245 243 237 / 0.84); border: 0; border-top: 1px solid rgb(72 66 61 / 0.13); border-left: 1px solid rgb(72 66 61 / 0.13); cursor: pointer; font-family: var(--journal-font); font-size: 8px; font-weight: 550; font-variation-settings: var(--journal-ui-axes); letter-spacing: 0.045em; text-transform: uppercase; }
+.journal-prompt__marker:focus-visible .journal-prompt__marker-figure { filter: none; }
+.journal-prompt__continue-page { position: absolute; right: 0; bottom: 0; z-index: 5; display: flex; min-height: 34px; align-items: center; gap: 8px; padding: 9px 13px 10px; color: rgb(42 39 35 / 0.72); background: rgb(245 243 237 / 0.84); border: 0; border-top: 1px solid rgb(72 66 61 / 0.13); border-left: 1px solid rgb(72 66 61 / 0.13); cursor: pointer; font-family: var(--journal-ui-font); font-size: 11px; font-weight: 400; font-variation-settings: normal; letter-spacing: -.0275em; }
 .journal-prompt__continue-page:hover:not(:disabled) { color: #1f1d1b; background: #ece8df; }
 .journal-prompt__continue-page[data-action="return"] { right: auto; left: 0; flex-direction: row; border-right: 1px solid rgb(72 66 61 / 0.13); border-left: 0; }
 .journal-prompt__continue-page:focus-visible { outline: 2px solid #292724; outline-offset: -4px; }
@@ -291,9 +319,9 @@
 .journal-prompt__prompt-card { align-self: start; margin-top: clamp(120px, 23vh, 220px); padding: 20px 18px 22px; color: #161616; background-color: #eeede9; background-image: url("/assets/textures/paper-fiber-cc0.jpg"); background-size: 540px auto; background-blend-mode: multiply; border: 1px solid rgb(17 17 17 / 0.17); box-shadow: 0 1px 2px rgb(0 0 0 / 0.16), 0 12px 24px rgb(0 0 0 / 0.1); transform: rotate(-1.4deg); }
 .journal-prompt__prompt-card h1 { margin: 0; font-family: var(--journal-font); font-size: clamp(21px, 1.8vw, 31px); font-weight: 650; font-variation-settings: var(--journal-display-axes); letter-spacing: -0.04em; line-height: 0.98; }
 .journal-prompt__tools { position: fixed; top: 20px; right: 22px; z-index: 40; display: flex; align-items: stretch; margin: 0; color: #f1f1ed; background-color: #181918; background-image: linear-gradient(rgb(255 255 255 / 0.08) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 0.08) 1px, transparent 1px); background-size: 22px 22px; border: 1px solid rgb(255 255 255 / 0.2); box-shadow: 0 8px 24px rgb(0 0 0 / 0.16); }
-.journal-prompt__toolbar-title { display: flex; align-items: center; padding: 0 14px; border-right: 1px solid rgb(255 255 255 / 0.15); font-family: var(--journal-font); font-size: 8px; font-weight: 550; font-variation-settings: var(--journal-ui-axes); letter-spacing: 0.075em; text-transform: uppercase; white-space: nowrap; }
+.journal-prompt__toolbar-title { display: flex; align-items: center; padding: 0 14px; border-right: 1px solid rgb(255 255 255 / 0.15); font-family: var(--journal-ui-font); font-size: 11px; font-weight: 400; font-variation-settings: normal; letter-spacing: -.0275em; white-space: nowrap; }
 .journal-prompt__toolbar-title i { margin-left: 10px; color: #8e8f8b; font-style: normal; }
-.journal-prompt__tools button { display: flex; min-height: 38px; align-items: center; justify-content: center; gap: 7px; padding: 8px 12px; color: #d4d3cf; background: rgb(24 25 24 / 0.76); border: 0; border-right: 1px solid rgb(255 255 255 / 0.14); cursor: pointer; font-family: var(--journal-font); font-size: 7px; font-weight: 550; font-variation-settings: var(--journal-ui-axes); letter-spacing: 0.055em; text-transform: uppercase; }
+.journal-prompt__tools button { display: flex; min-height: 38px; align-items: center; justify-content: center; gap: 7px; padding: 8px 12px; color: #d4d3cf; background: rgb(24 25 24 / 0.76); border: 0; border-right: 1px solid rgb(255 255 255 / 0.14); cursor: pointer; font-family: var(--journal-ui-font); font-size: 11px; font-weight: 400; font-variation-settings: normal; letter-spacing: -.0275em; }
 .journal-prompt__tools button:hover:not(:disabled) { color: #141514; background: #f1f1ed; }
 .journal-prompt__surface-toggle svg { color: #c6bda9; }
 .journal-prompt__tools button:disabled { cursor: not-allowed; opacity: 0.34; }
@@ -337,7 +365,7 @@
 .journal-prompt__keepsake-cover-face--inside { background-color: var(--cover-color); background-image: linear-gradient(106deg, rgb(107 31 22 / 0.12), transparent 32%, rgb(255 235 217 / 0.06)), var(--cover-material); background-position: center, center; background-size: 100% 100%, 680px 680px; border: 1px solid color-mix(in srgb, var(--cover-edge), transparent 16%); border-radius: 28px 5px 5px 28px; box-shadow: inset -13px 0 21px -18px rgb(35 21 17 / 0.48), inset 1px 0 rgb(255 232 214 / 0.13); transform: rotateY(180deg) translateZ(0.5px); }
 .journal-prompt__notebook-cover-art { box-sizing: border-box; display: flex; min-height: 100%; flex-direction: column; padding: 12% 11%; color: var(--notebook-cover-ink); background: transparent; border: 0; position: relative; }
 .journal-prompt__notebook-cover-art > * { position: relative; z-index: 1; }
-.journal-prompt__notebook-cover-art > strong { max-width: 86%; margin-block: auto; font: 400 clamp(22px, 3.2vw, 43px)/.94 Georgia, "Times New Roman", serif; letter-spacing: -.04em; }
+.journal-prompt__notebook-cover-art > strong { max-width: 86%; margin: 28px auto auto; font: 400 clamp(22px, 3.2vw, 43px)/.94 Georgia, "Times New Roman", serif; letter-spacing: -.04em; text-align: center; }
 .journal-prompt__notebook-cover-art[data-inside="true"] { opacity: .82; filter: saturate(.82); }
 .journal-prompt__keepsake-cover-face .journal-prompt__notebook-cover-art { position: absolute; inset: 0; border: 0; border-radius: inherit; }
 .journal-prompt__export-paper--cover { background: none; }
@@ -391,10 +419,44 @@
   100% { opacity: 1; }
 }
 
+@keyframes journal-desk-shadow-settle {
+  0%, 24% { filter: blur(4.2px); opacity: 0; }
+  72% { filter: blur(3.15px); opacity: 0.24; }
+  100% { filter: blur(2.7px); opacity: 0.52; }
+}
+
 @keyframes journal-fresh-page {
   0% { opacity: 0.88; filter: brightness(0.985); transform: translateY(30px) rotate(0.08deg); }
   68% { opacity: 1; filter: brightness(1.006); transform: translateY(-1.5px) rotate(-0.025deg); }
   100% { opacity: 1; filter: brightness(1); transform: translateY(0) rotate(0deg); }
+}
+
+@keyframes journal-initial-live-page {
+  0% { opacity: 0; transform: translateY(170px) rotate(.12deg) scale(.985); }
+  64% { opacity: 1; transform: translateY(-5px) rotate(-.035deg) scale(1.002); }
+  82% { transform: translateY(1.5px) rotate(.015deg) scale(.9995); }
+  100% { opacity: 1; transform: translateY(0) rotate(0) scale(1); }
+}
+
+@keyframes journal-archived-page-entry {
+  0% { filter: blur(1px) brightness(1.035); opacity: 0; }
+  45% { filter: blur(.35px) brightness(1.012); opacity: .48; }
+  100% { filter: blur(0) brightness(1); opacity: 1; }
+}
+
+@keyframes journal-marker-enter {
+  from { opacity: 0; transform: translateY(105px) rotate(2deg); }
+  to { opacity: 1; transform: translateY(0) rotate(0deg); }
+}
+
+@keyframes journal-dappled-light-arrive {
+  0% { opacity: 0; }
+  18% { opacity: 0.035; }
+  36% { opacity: 0.13; }
+  54% { opacity: 0.3; }
+  72% { opacity: 0.55; }
+  88% { opacity: 0.8; }
+  100% { opacity: 1; }
 }
 
 @media (min-width: 901px) and (max-width: 1200px) {
@@ -404,7 +466,7 @@
 }
 
 @media (max-width: 1200px), (max-height: 720px) {
-  .journal-prompt__marker-station { --marker-object-width: 96px; --marker-object-height: 288px; right: auto; bottom: -106px; left: 40px; }
+  .journal-prompt__marker-station { --marker-object-width: 132px; --marker-object-height: 163px; right: auto; bottom: -28px; left: max(12px, calc(50vw - (var(--journal-sheet-width) / 2) - 110px)); }
 }
 
 @media (max-width: 900px) {
@@ -427,14 +489,16 @@
   .journal-prompt__tools button:not(.journal-prompt__close) { font-size: 0; }
   .journal-prompt { --journal-resting-paper-width: calc(100vw - 40px); --journal-resting-paper-scale: 1; }
   .journal-prompt__archived-page { top: 52%; opacity: 1; transform: translate(calc(-50% + var(--page-x) + var(--page-drag-x)), calc(-50% + var(--page-y) + var(--page-drag-y))) rotate(var(--page-rotation)) scale(var(--page-mobile-scale)) translateY(var(--page-lift, 0px)) rotate(var(--page-hover-rotation, 0deg)) rotate(var(--page-drag-rotation, 0deg)) scale(var(--page-hover-scale, 1)); }
-  .journal-prompt[data-desk-tidy="true"] .journal-prompt__archived-page { top: 170px; left: 55%; display: block; transform: translate(calc(-50% + var(--page-tidy-mobile-x) + var(--page-drag-x)), calc(var(--page-tidy-y) + var(--page-drag-y))) rotate(var(--page-tidy-rotation)) scale(0.6) translateY(var(--page-lift, 0px)) rotate(var(--page-hover-rotation, 0deg)) rotate(var(--page-drag-rotation, 0deg)) scale(var(--page-hover-scale, 1)); transform-origin: top center; }
-  .journal-prompt__marker-station { --marker-object-width: 78px; --marker-object-height: 234px; right: auto; bottom: -74px; left: 24px; }
+  .journal-prompt[data-desk-tidy="true"] .journal-prompt__archived-page { display: block; transform: translate(calc(-50% + 5vw + var(--page-tidy-mobile-x) + var(--page-drag-x)), calc(170px - 52vh - 20% + var(--page-tidy-y) + var(--page-drag-y))) rotate(var(--page-tidy-rotation)) scale(0.6) translateY(var(--page-lift, 0px)) rotate(var(--page-hover-rotation, 0deg)) rotate(var(--page-drag-rotation, 0deg)) scale(var(--page-hover-scale, 1)); }
+  .journal-prompt__marker-station { --marker-object-width: 96px; --marker-object-height: 118px; right: auto; bottom: -18px; left: 4px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .archive-garden__journal-entry { transition: none; }
   .journal-prompt__export-book,
   .journal-prompt__paper-stack,
+  .journal-prompt__marker-station,
+  .journal-prompt > .journal-prompt__dappled-light,
   .journal-prompt__archived-page[data-releasing="true"] { animation: none; }
   .journal-prompt__marker,
   .journal-prompt__marker-figure,

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, EyeSlashIcon, HighlighterIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
+import { ArchiveIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, EyeSlashIcon, HighlighterIcon, PencilSimpleIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
 import { PDFDocument } from "pdf-lib";
 import { useReducedMotion } from "../hooks/useReducedMotion";
 import { JournalDeskSurface } from "./JournalDeskSurface";
 import { JournalDappledLight } from "./JournalDappledLight";
 import { notebookPalette, type FolderMaterial, type JournalSnapshot } from "../lib/fieldNotesDb";
-import { JournalInkLayer } from "./JournalInkLayer";
+import { JournalInkLayer, type HighlighterMotion } from "./JournalInkLayer";
 import {
   createJournalId,
   loadHighlightStrokes,
@@ -60,6 +60,7 @@ type PageDrag = {
   startRect: DOMRect;
   startX: number;
   startY: number;
+  tilt: number;
 };
 
 type PaperPose = {
@@ -243,7 +244,11 @@ function ArchivedPagePreview({ densityCap = 2, page, pageNumber, showIndex = tru
       if (cancelled) return;
       const width = 480;
       const height = Math.round(width * 1.414);
-      const density = Math.min(window.devicePixelRatio || 1, densityCap);
+      // The sheet is frequently scaled and rotated again inside the notebook
+      // preview. Render at the requested density even when an embedded browser
+      // reports a fractional/low devicePixelRatio, otherwise small mono type
+      // is rasterized once at near-1x and looks soft after that second transform.
+      const density = Math.max(1, densityCap);
       const pixelWidth = Math.round(width * density);
       const pixelHeight = Math.round(height * density);
       if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
@@ -322,7 +327,7 @@ function ArchivedPagePreview({ densityCap = 2, page, pageNumber, showIndex = tru
       if (showIndex) {
         context.textAlign = "right";
         const indexFontSize = 10 * previewScale;
-        context.font = `500 ${indexFontSize}px "Recursive Variable", "Recursive", sans-serif`;
+        context.font = `400 ${indexFontSize}px "Geist Mono Variable", "Geist Mono", monospace`;
         context.fillStyle = "rgb(45 40 35 / 0.72)";
         const indexMetrics = context.measureText("00");
         const indexTop = 10 * previewScale;
@@ -334,7 +339,7 @@ function ArchivedPagePreview({ densityCap = 2, page, pageNumber, showIndex = tru
       }
 
       context.textAlign = "left";
-      context.font = `420 ${fontSize}px "Recursive Variable", "Recursive", sans-serif`;
+      context.font = `300 ${fontSize}px "Geist Mono Variable", "Geist Mono", monospace`;
       if ("letterSpacing" in context) context.letterSpacing = `${letterSpacing}px`;
       const textMetrics = context.measureText("Mg");
       const baselineOffset = (lineHeight - fontSize) / 2 + textMetrics.actualBoundingBoxAscent;
@@ -348,10 +353,10 @@ function ArchivedPagePreview({ densityCap = 2, page, pageNumber, showIndex = tru
           if (character.trim()) {
             const imprintIndex = lineIndex * 127 + characterIndex;
             const hash = Math.imul(seed ^ (imprintIndex + 1), 2654435761) >>> 0;
-            context.globalAlpha = tone === "fresh" ? 0.9 + ((hash >>> 16) & 255) / 255 * 0.08 : 0.78 + ((hash >>> 16) & 255) / 255 * 0.16;
-            context.fillStyle = tone === "fresh" ? "#221e1b" : "#35312d";
-            context.shadowColor = "rgb(17 12 9 / 0.28)";
-            context.shadowBlur = 0.12 + ((hash >>> 24) & 255) / 255 * 0.28;
+            context.globalAlpha = tone === "fresh" ? 0.8 + ((hash >>> 16) & 255) / 255 * 0.08 : 0.7 + ((hash >>> 16) & 255) / 255 * 0.1;
+            context.fillStyle = tone === "fresh" ? "#292622" : "#35312d";
+            context.shadowColor = "transparent";
+            context.shadowBlur = 0;
             // Keep every glyph locked to the canonical line and character
             // origin. Ink pressure still varies, but the archived sheet no
             // longer develops a visibly wandering baseline when scaled down.
@@ -407,7 +412,7 @@ function InkedPagePreview({
     const draw = () => {
       frame = 0;
       if (cancelled) return;
-      const density = Math.min(window.devicePixelRatio || 1, densityCap);
+      const density = Math.max(1, densityCap);
       canvas.width = Math.round(PAGE_WIDTH * density);
       canvas.height = Math.round(PAGE_HEIGHT * density);
       const context = canvas.getContext("2d", { alpha: false });
@@ -560,7 +565,7 @@ function createDeskSound() {
     space: "/assets/sounds/journal/space.wav?v=mechanical-2",
     backspace: "/assets/sounds/journal/backspace.wav?v=mechanical-2",
     "highlighter-close": "/assets/sounds/journal/highlighter-close.wav?v=physical-1",
-    "highlighter-draw": "/assets/sounds/journal/highlighter-draw.wav?v=physical-3",
+    "highlighter-draw": "/assets/sounds/journal/highlighter-draw-loop.wav?v=continuous-1",
     "highlighter-open": "/assets/sounds/journal/highlighter-open.wav?v=physical-1",
     return: "/assets/sounds/journal/return.wav?v=mechanical-2",
   };
@@ -571,10 +576,11 @@ function createDeskSound() {
   let lastStrikeAt = 0;
   let smoothedInterval = 0;
   let dynamics: SoundShape = { gain: 1, rate: 1 };
-  let markerFadeTimer = 0;
-  let markerLoop: { gain: GainNode; source: AudioBufferSourceNode } | null = null;
   const samples = new Map<string, AudioBuffer>();
   const heldKeys = new Map<string, number>();
+  let markerMotionFadeTimer = 0;
+  let markerContactRequested = false;
+  let markerContactVoice: { filter: BiquadFilterNode; gain: GainNode; source: AudioBufferSourceNode } | null = null;
 
   const ensureContext = () => {
     context ||= new AudioContext();
@@ -591,6 +597,84 @@ function createDeskSound() {
       samples.set(path, await audio.decodeAudioData(await response.arrayBuffer()));
     })).then(() => undefined).catch(() => undefined);
     return warmPromise;
+  };
+
+  const stopMarkerContact = (release = 0.13) => {
+    window.clearTimeout(markerMotionFadeTimer);
+    markerMotionFadeTimer = 0;
+    markerContactRequested = false;
+    const voice = markerContactVoice;
+    markerContactVoice = null;
+    if (!voice || !context) return;
+    const now = context.currentTime;
+    voice.gain.gain.cancelScheduledValues(now);
+    voice.gain.gain.setValueAtTime(Math.max(0.0001, voice.gain.gain.value), now);
+    voice.gain.gain.linearRampToValueAtTime(0.0001, now + release);
+    try {
+      voice.source.stop(now + release + 0.025);
+    } catch {
+      // The voice may already have been stopped during teardown.
+    }
+  };
+
+  const startMarkerContact = () => {
+    markerContactRequested = true;
+    const startNow = () => {
+      if (!markerContactRequested || markerContactVoice) return;
+      const audio = ensureContext();
+      const recorded = samples.get(files["highlighter-draw"]);
+      if (!recorded) return;
+      const source = audio.createBufferSource();
+      const filter = audio.createBiquadFilter();
+      const gain = audio.createGain();
+      const now = audio.currentTime;
+      source.buffer = recorded;
+      source.loop = true;
+      source.playbackRate.value = 0.9;
+      filter.type = "lowpass";
+      filter.frequency.value = 1350;
+      filter.Q.value = 0.65;
+      gain.gain.setValueAtTime(0.0001, now);
+      source.connect(filter).connect(gain).connect(audio.destination);
+      markerContactVoice = { filter, gain, source };
+      source.onended = () => {
+        if (markerContactVoice?.source === source) markerContactVoice = null;
+      };
+      const safeOffset = 0.06 + Math.random() * Math.max(0, recorded.duration - 0.12);
+      source.start(now, safeOffset);
+    };
+
+    if (samples.has(files["highlighter-draw"])) startNow();
+    else void warm().then(startNow);
+  };
+
+  const shapeMarkerMotion = (motion: HighlighterMotion) => {
+    if (!markerContactRequested || !context || !markerContactVoice) return;
+    const now = context.currentTime;
+    const unit = (value: number, fallback = 0) => Number.isFinite(value)
+      ? Math.min(1, Math.max(0, value))
+      : fallback;
+    const speed = unit(motion.speed);
+    const pressure = unit(motion.pressure, 0.5);
+    const turn = unit(motion.turn);
+    const acceleration = unit(motion.acceleration);
+    const voice = markerContactVoice;
+    const targetGain = 0.04 + pressure * 0.065 + speed * 0.035 + turn * 0.018 + acceleration * 0.008;
+    const targetRate = 0.86 + speed * 0.22 + turn * 0.025;
+    const targetFrequency = 1050 + speed * 2650 + pressure * 420 + turn * 950;
+    voice.gain.gain.cancelScheduledValues(now);
+    voice.source.playbackRate.cancelScheduledValues(now);
+    voice.filter.frequency.cancelScheduledValues(now);
+    voice.filter.Q.cancelScheduledValues(now);
+    voice.gain.gain.setTargetAtTime(targetGain, now, 0.032);
+    voice.source.playbackRate.setTargetAtTime(targetRate, now, 0.045);
+    voice.filter.frequency.setTargetAtTime(targetFrequency, now, 0.038);
+    voice.filter.Q.setTargetAtTime(0.55 + turn * 1.35, now, 0.04);
+    window.clearTimeout(markerMotionFadeTimer);
+    markerMotionFadeTimer = window.setTimeout(() => {
+      if (!context || !markerContactVoice) return;
+      markerContactVoice.gain.gain.setTargetAtTime(0.0001, context.currentTime, 0.045);
+    }, 115);
   };
 
   const play = (name: SoundName, gainOverride?: number, rateOverride?: number, delay = 0) => {
@@ -649,69 +733,30 @@ function createDeskSound() {
     play(...second, delay);
   };
 
-  const stopMarkerStroke = () => {
-    window.clearTimeout(markerFadeTimer);
-    markerFadeTimer = 0;
-    const activeLoop = markerLoop;
-    if (!activeLoop || !context) return;
-    markerLoop = null;
-    const now = context.currentTime;
-    activeLoop.gain.gain.cancelScheduledValues(now);
-    activeLoop.gain.gain.setValueAtTime(Math.max(0.0001, activeLoop.gain.gain.value), now);
-    activeLoop.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
-    window.setTimeout(() => {
-      try {
-        activeLoop.source.stop();
-      } catch {
-        // The source may already have ended during pointer release.
-      }
-    }, 70);
-  };
-
   return {
     dispose() {
-      stopMarkerStroke();
+      markerContactRequested = false;
+      try {
+        markerContactVoice?.source.stop();
+      } catch {
+        // The contact voice may already have ended.
+      }
+      markerContactVoice = null;
       void context?.close();
       context = null;
     },
     markerClose() {
-      stopMarkerStroke();
+      stopMarkerContact();
       play("highlighter-close", 0.82, 0.98 + Math.random() * 0.025);
     },
-    markerMotion(intensity: number) {
-      if (intensity <= 0) {
-        stopMarkerStroke();
-        return;
-      }
-      const audio = ensureContext();
-      const recorded = samples.get(files["highlighter-draw"]);
-      if (!recorded) {
-        void warm();
-        return;
-      }
-      if (!markerLoop) {
-        const source = audio.createBufferSource();
-        const gain = audio.createGain();
-        source.buffer = recorded;
-        source.loop = true;
-        source.playbackRate.value = 0.99 + Math.random() * 0.02;
-        gain.gain.value = 0.0001;
-        source.connect(gain).connect(audio.destination);
-        markerLoop = { gain, source };
-        source.onended = () => {
-          if (markerLoop?.source === source) markerLoop = null;
-        };
-        source.start();
-      }
-      const now = audio.currentTime;
-      const target = outputGain * (0.18 + Math.min(1, intensity) * 0.17);
-      markerLoop.gain.gain.cancelScheduledValues(now);
-      markerLoop.gain.gain.setTargetAtTime(target, now, 0.018);
-      window.clearTimeout(markerFadeTimer);
-      markerFadeTimer = window.setTimeout(() => {
-        if (!markerLoop || !context) return;
-        markerLoop.gain.gain.setTargetAtTime(0.0001, context.currentTime, 0.032);
-      }, 105);
+    markerStrokeEnd() {
+      stopMarkerContact();
+    },
+    markerStrokeMotion(motion: HighlighterMotion) {
+      shapeMarkerMotion(motion);
+    },
+    markerStrokeStart() {
+      startMarkerContact();
     },
     markerOpen() {
       play("highlighter-open", 0.9, 0.985 + Math.random() * 0.025);
@@ -762,8 +807,10 @@ type JournalPromptProps = {
   folderTitle?: string;
   journalKey?: string;
   notebookMaterial?: FolderMaterial;
+  onArchiveNotebook?: () => void | Promise<void>;
   onClose: () => void;
   onJournalChange?: (snapshot: JournalSnapshot) => void;
+  onRenameNotebook?: () => void | Promise<void>;
   promptText?: string;
 };
 
@@ -826,12 +873,12 @@ async function drawNotebookCover(context: CanvasRenderingContext2D, title: strin
   }
   if (currentLine) titleLines.push(currentLine);
   const lineHeight = 178;
-  const firstBaseline = PDF_HEIGHT / 2 - ((titleLines.length - 1) * lineHeight) / 2 + 58;
+  const firstBaseline = 300;
   titleLines.forEach((line, index) => context.fillText(line, 180, firstBaseline + index * lineHeight));
   context.restore();
 }
 
-export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kraft", onClose, onJournalChange, promptText }: JournalPromptProps) {
+export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kraft", onArchiveNotebook, onClose, onJournalChange, onRenameNotebook, promptText }: JournalPromptProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const paperRef = useRef<HTMLDivElement | null>(null);
   const pickedUpPaperRef = useRef<HTMLDivElement | null>(null);
@@ -871,6 +918,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
   const [deletedPage, setDeletedPage] = useState<DeletedPage | null>(null);
   const [pageCycle, setPageCycle] = useState(0);
+  const [initialDeskEntry, setInitialDeskEntry] = useState(true);
   const [releasingPageId, setReleasingPageId] = useState<string | null>(null);
   const [draggingPageId, setDraggingPageId] = useState<string | null>(null);
   const [deskTidy, setDeskTidy] = useState(() => {
@@ -885,6 +933,11 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     ? pages.find((page) => page.id === activeArchivedId) ?? null
     : null;
   const editorValue = activeArchivedPage?.text ?? answer;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setInitialDeskEntry(false), 2400);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -922,8 +975,13 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     save(0);
   }, []);
 
-  const soundHighlightMotion = useCallback((intensity: number) => {
-    soundRef.current?.markerMotion(intensity);
+  const soundHighlightWetChange = useCallback((wet: boolean) => {
+    if (wet) soundRef.current?.markerStrokeStart();
+    else soundRef.current?.markerStrokeEnd();
+  }, []);
+
+  const soundHighlightMotion = useCallback((motion: HighlighterMotion) => {
+    soundRef.current?.markerStrokeMotion(motion);
   }, []);
 
   const toggleHighlighterVisibility = () => {
@@ -996,27 +1054,71 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       origin.visualWidth / Math.max(1, destination.width),
       origin.visualHeight / Math.max(1, destination.height),
     );
+    const settledShadow = localDeskShadow(origin.rotation, scale);
     const animation = paper.animate(
       [
         { transform: `translate(${x}px, ${y}px) rotate(${origin.rotation}deg) scale(${scale})`, transformOrigin: "50% 50%" },
-        {
-          offset: 0.78,
-          transform: `translate(${x * 0.045}px, ${y * 0.045}px) rotate(${origin.rotation * 0.05}deg) scale(0.992)`,
-          transformOrigin: "50% 50%",
-        },
-        { offset: 0.9, transform: "translate(-1.5px, -2px) rotate(-0.06deg) scale(1.004)", transformOrigin: "50% 50%" },
         { transform: "translate(0, 0) rotate(0deg) scale(1)", transformOrigin: "50% 50%" },
       ],
-      { duration: 590, easing: "cubic-bezier(0.16, 0.78, 0.22, 1)" },
+      { duration: 620, easing: "cubic-bezier(0.22, 0.68, 0.18, 1)" },
     );
     animation.id = "journal-paper-pickup";
+
+    const liftedShadow = paper.querySelector<HTMLElement>(".journal-prompt__paper-shadow--picked");
+    const liftedShadowAnimation = liftedShadow?.animate(
+      [
+        { filter: "blur(3.2px)", opacity: 0 },
+        { filter: "blur(2.45px)", opacity: 0.58, offset: 0.5 },
+        { filter: "blur(2.1px)", opacity: 0.9 },
+      ],
+      { duration: 620, easing: "cubic-bezier(0.22, 0.68, 0.18, 1)", fill: "forwards" },
+    );
+    if (liftedShadowAnimation) liftedShadowAnimation.id = "journal-paper-pickup-lifted-shadow";
+
+    const contactShadow = paper.querySelector<HTMLElement>(".journal-prompt__return-contact-shadow");
+    const contactShadowAnimation = contactShadow?.animate(
+      [
+        {
+          filter: "blur(2.7px)",
+          opacity: 0.52,
+          transform: `translate(${settledShadow.x}px, ${settledShadow.y}px) scale(1)`,
+        },
+        {
+          filter: "blur(4.2px)",
+          opacity: 0.12,
+          offset: 0.48,
+          transform: `translate(${settledShadow.x * 1.7}px, ${settledShadow.y * 1.7}px) scale(0.995)`,
+        },
+        {
+          filter: "blur(5.4px)",
+          opacity: 0,
+          transform: `translate(${settledShadow.x * 2.4}px, ${settledShadow.y * 2.4}px) scale(0.99)`,
+        },
+      ],
+      { duration: 620, easing: "cubic-bezier(0.22, 0.68, 0.18, 1)", fill: "forwards" },
+    );
+    if (contactShadowAnimation) contactShadowAnimation.id = "journal-paper-pickup-contact-shadow";
+
+    return () => {
+      animation.cancel();
+      liftedShadowAnimation?.cancel();
+      contactShadowAnimation?.cancel();
+    };
   }, [activeArchivedPage?.id, reducedMotion]);
 
   useLayoutEffect(() => {
     if (!returningPaperId) return;
     const paper = pickedUpPaperRef.current;
     const origin = pickupOriginRef.current;
+    let settled = false;
+    let cancelled = false;
+    let settleTimer = 0;
+    let paperAnimation: Animation | null = null;
+    let liftedShadowAnimation: Animation | null = null;
+    let contactShadowAnimation: Animation | null = null;
     const finish = () => {
+      if (settled) return;
+      settled = true;
       discardArchivedPageIfBlank(returningPaperId);
       setActiveArchivedId(null);
       setDeletedPage(null);
@@ -1035,15 +1137,78 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       origin.visualWidth / Math.max(1, current.width),
       origin.visualHeight / Math.max(1, current.height),
     );
-    const animation = paper.animate(
+    const settledShadow = localDeskShadow(origin.rotation, scale);
+    paperAnimation = paper.animate(
       [
         { transform: "translate(0, 0) rotate(0deg) scale(1)", transformOrigin: "50% 50%" },
         { transform: `translate(${x}px, ${y}px) rotate(${origin.rotation}deg) scale(${scale})`, transformOrigin: "50% 50%" },
       ],
       { duration: 620, easing: "cubic-bezier(0.2, 0.72, 0.22, 1)", fill: "forwards" },
     );
-    animation.id = "journal-paper-return";
-    void animation.finished.then(finish).catch(finish);
+    paperAnimation.id = "journal-paper-return";
+
+    const liftedShadow = paper.querySelector<HTMLElement>(".journal-prompt__paper-shadow--picked");
+    if (liftedShadow) {
+      liftedShadowAnimation = liftedShadow.animate(
+        [
+          { filter: "blur(2.1px)", opacity: 0.9 },
+          { filter: "blur(2.45px)", opacity: 0.7, offset: 0.5 },
+          { filter: "blur(2.85px)", opacity: 0.24, offset: 0.84 },
+          { filter: "blur(3.1px)", opacity: 0 },
+        ],
+        { duration: 620, easing: "cubic-bezier(0.2, 0.72, 0.22, 1)", fill: "forwards" },
+      );
+      liftedShadowAnimation.id = "journal-paper-return-lifted-shadow";
+    }
+
+    const contactShadow = paper.querySelector<HTMLElement>(".journal-prompt__return-contact-shadow");
+    if (contactShadow) {
+      contactShadowAnimation = contactShadow.animate(
+        [
+          {
+            filter: "blur(5.4px)",
+            opacity: 0,
+            transform: `translate(${settledShadow.x * 2.4}px, ${settledShadow.y * 2.4}px) scale(0.99)`,
+          },
+          {
+            filter: "blur(4.1px)",
+            opacity: 0.1,
+            offset: 0.54,
+            transform: `translate(${settledShadow.x * 1.75}px, ${settledShadow.y * 1.75}px) scale(0.994)`,
+          },
+          {
+            filter: "blur(3.15px)",
+            opacity: 0.34,
+            offset: 0.84,
+            transform: `translate(${settledShadow.x * 1.18}px, ${settledShadow.y * 1.18}px) scale(0.998)`,
+          },
+          {
+            filter: "blur(2.7px)",
+            opacity: 0.52,
+            transform: `translate(${settledShadow.x}px, ${settledShadow.y}px) scale(1)`,
+          },
+        ],
+        { duration: 620, easing: "cubic-bezier(0.2, 0.72, 0.22, 1)", fill: "forwards" },
+      );
+      contactShadowAnimation.id = "journal-paper-return-contact-shadow";
+    }
+
+    void paperAnimation.finished.then(() => {
+      if (cancelled) return;
+      // Let the contact frame paint before swapping the moving sheet for its
+      // desk representation. Without this hold React can commit the handoff
+      // in the same frame as the final shadow keyframe.
+      settleTimer = window.setTimeout(finish, 70);
+    }).catch(() => {
+      if (!cancelled) finish();
+    });
+    return () => {
+      cancelled = true;
+      window.clearTimeout(settleTimer);
+      paperAnimation?.cancel();
+      liftedShadowAnimation?.cancel();
+      contactShadowAnimation?.cancel();
+    };
   }, [reducedMotion, returningPaperId]);
 
   useLayoutEffect(() => {
@@ -1598,7 +1763,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     deskArrangeTimerRef.current = window.setTimeout(() => {
       setDeskArranging(false);
       deskArrangeTimerRef.current = null;
-    }, 920);
+    }, 980);
   };
 
   // The desk is a collection of physical sheets, so editing a sheet must not
@@ -1745,14 +1910,23 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           const tidyRotation = `${tidyRotationValue.toFixed(2)}deg`;
           const tidyShadow = localDeskShadow(tidyRotationValue, 0.84);
           const tidyMobileX = (visibleIndex - (visiblePages.length - 1) / 2) * tidyMobileStepX;
+          const isReturnTarget = returningPaperId === page.id;
+          // The picked sheet is transferred to the writing stage. Keeping a
+          // second faded rendering on the desk makes the interaction read as
+          // a copy, especially while the pickup animation is in flight.
+          // On return, only its empty destination shadow is reserved so the
+          // physical sheet has somewhere visible to settle without a snap.
+          if (activeArchivedId === page.id && !isReturnTarget) return null;
           return (
             <button
+              aria-hidden={isReturnTarget || undefined}
               aria-label={`Pick up page ${pageIndex + 1}`}
               className="journal-prompt__archived-page"
-              data-active-source={activeArchivedId === page.id}
               data-dragging={draggingPageId === page.id}
+              data-initial-entry={pageIndex >= 3 && initialDeskEntry ? "true" : undefined}
               data-page-id={page.id}
               data-releasing={page.id === releasingPageId}
+              data-return-target={isReturnTarget || undefined}
               key={page.id}
               onClick={(event) => {
                 if (draggedPageRef.current === page.id) {
@@ -1766,10 +1940,12 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 if (!drag || drag.id !== page.id || drag.pointerId !== event.pointerId) return;
                 drag.element.style.setProperty("--page-drag-x", `${drag.originX}px`);
                 drag.element.style.setProperty("--page-drag-y", `${drag.originY}px`);
-                drag.element.style.setProperty("--page-drag-rotation", "0deg");
                 placeArchivedIndex(drag.element, drag.startRect);
                 pageDragRef.current = null;
                 setDraggingPageId(null);
+                window.requestAnimationFrame(() => {
+                  drag.element.style.setProperty("--page-drag-rotation", "0deg");
+                });
               }}
               onPointerDown={(event) => {
                 if (event.button !== 0) return;
@@ -1795,6 +1971,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                   startRect: element.getBoundingClientRect(),
                   startX: event.clientX,
                   startY: event.clientY,
+                  tilt: 0,
                 };
                 placeArchivedIndex(element);
                 setDraggingPageId(page.id);
@@ -1812,8 +1989,10 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 const now = performance.now();
                 const elapsed = Math.max(8, now - drag.lastAt);
                 const horizontalVelocity = (event.clientX - drag.lastClientX) / elapsed;
-                const dragRotation = Math.max(-1.15, Math.min(1.15, horizontalVelocity * 3.2));
-                drag.element.style.setProperty("--page-drag-rotation", `${dragRotation.toFixed(2)}deg`);
+                const targetTilt = Math.max(-1.05, Math.min(1.05, horizontalVelocity * 2.65));
+                const smoothing = 1 - Math.exp(-elapsed / 68);
+                drag.tilt += (targetTilt - drag.tilt) * smoothing;
+                drag.element.style.setProperty("--page-drag-rotation", `${drag.tilt.toFixed(2)}deg`);
                 drag.lastAt = now;
                 drag.lastClientX = event.clientX;
               }}
@@ -1832,10 +2011,12 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                       : entry
                   )));
                 }
-                drag.element.style.setProperty("--page-drag-rotation", "0deg");
                 if (drag.element.hasPointerCapture(event.pointerId)) drag.element.releasePointerCapture(event.pointerId);
                 pageDragRef.current = null;
                 setDraggingPageId(null);
+                window.requestAnimationFrame(() => {
+                  drag.element.style.setProperty("--page-drag-rotation", "0deg");
+                });
               }}
               type="button"
               style={{
@@ -1857,13 +2038,19 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 "--page-tidy-y": `${tidyY}px`,
                 "--page-x": `calc(${placement.x} + ${scatter.x.toFixed(2)}vw)`,
                 "--page-y": `calc(${placement.y} + ${scatter.y.toFixed(2)}vh)`,
+                "--page-entry-delay": `${Math.max(0, pageIndex - 3) * 70}ms`,
+                viewTransitionName: pageIndex < 3 ? `field-note-page-${pageIndex + 1}` : "none",
               } as React.CSSProperties}
             >
               <i aria-hidden="true" className="journal-prompt__archived-shadow" />
-              <InkedPagePreview page={page} pageNumber={pageIndex + 1} showIndex={false} strokes={highlightStrokes} />
-              <span aria-hidden="true" className="journal-prompt__archived-page-index">
-                {String(pageIndex + 1).padStart(2, "0")}
-              </span>
+              {!isReturnTarget ? (
+                <>
+                  <InkedPagePreview page={page} pageNumber={pageIndex + 1} showIndex={false} strokes={highlightStrokes} />
+                  <span aria-hidden="true" className="journal-prompt__archived-page-index">
+                    {String(pageIndex + 1).padStart(2, "0")}
+                  </span>
+                </>
+              ) : null}
             </button>
           );
         })}
@@ -1880,6 +2067,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           <div
             className="journal-prompt__paper-stack journal-prompt__paper-stack--live"
             data-covered={Boolean(activeArchivedPage) && !returningPaperId}
+            data-initial-entry={initialDeskEntry}
             data-page-number={String(meaningfulPages.length + 1).padStart(2, "0")}
             key={`live-${pageCycle}`}
             ref={paperRef}
@@ -1931,6 +2119,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 active={highlighterActive && !activeArchivedPage}
                 onCommit={commitHighlight}
                 onStrokeMotion={soundHighlightMotion}
+                onWetChange={soundHighlightWetChange}
                 pageId={livePageId}
                 strokes={highlightStrokes}
               />
@@ -1951,6 +2140,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           {activeArchivedPage ? (
             <div className="journal-prompt__paper-stack journal-prompt__paper-stack--picked" key={activeArchivedPage.id} ref={pickedUpPaperRef}>
               <i aria-hidden="true" className="journal-prompt__paper-shadow journal-prompt__paper-shadow--picked" />
+              <i aria-hidden="true" className="journal-prompt__return-contact-shadow" />
               <section
                 className="journal-prompt__paper"
                 data-motion-face={returningPaperId === activeArchivedPage.id}
@@ -1982,6 +2172,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                   active={highlighterActive && returningPaperId !== activeArchivedPage.id}
                   onCommit={commitHighlight}
                   onStrokeMotion={soundHighlightMotion}
+                  onWetChange={soundHighlightWetChange}
                   pageId={activeArchivedPage.id}
                   strokes={highlightStrokes}
                 />
@@ -2011,9 +2202,9 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
             >
               <span aria-hidden="true" className="journal-prompt__marker-figure">
                 <i className="journal-prompt__marker-contact-shadow" />
-                <img alt="" className="journal-prompt__marker-capped" draggable="false" src="/assets/tools/journal-highlighter-capped-v1.png" />
-                <img alt="" className="journal-prompt__marker-body" draggable="false" src="/assets/tools/journal-highlighter-body-v2.png" />
-                <img alt="" className="journal-prompt__marker-cap" draggable="false" src="/assets/tools/journal-highlighter-cap-v2.png" />
+                <img alt="" className="journal-prompt__marker-capped" draggable="false" src="/assets/tools/journal-mini-highlighter-capped-v1.png" />
+                <img alt="" className="journal-prompt__marker-body" draggable="false" src="/assets/tools/journal-mini-highlighter-body-v1.png" />
+                <img alt="" className="journal-prompt__marker-cap" draggable="false" src="/assets/tools/journal-mini-highlighter-cap-v1.png" />
               </span>
             </button>
         </div> : null}
@@ -2047,6 +2238,8 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
             {deskTidy ? "Re-tidy desk" : "Tidy desk"}
           </button>
           <button disabled={!exportSheets.length} onClick={() => { setExportPageIndex(0); setExportTurningIndex(null); setExportPreviewOpen(true); }} type="button"><DownloadSimpleIcon aria-hidden="true" size={17} />Keep a copy</button>
+          {onRenameNotebook ? <button aria-label="Rename notebook" onClick={onRenameNotebook} type="button"><PencilSimpleIcon aria-hidden="true" size={17} />Rename</button> : null}
+          {onArchiveNotebook ? <button aria-label="Archive notebook" onClick={onArchiveNotebook} type="button"><ArchiveIcon aria-hidden="true" size={17} />Archive</button> : null}
           <button aria-label="Close journal" className="journal-prompt__close" onClick={onClose} type="button"><XIcon aria-hidden="true" size={17} weight="bold" /></button>
         </div>
       </main>

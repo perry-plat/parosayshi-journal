@@ -6,10 +6,10 @@ export const LOCAL_OWNER_ID = "local-preview";
 export type FolderMaterial = "kraft" | "moss" | "clay" | "charcoal";
 
 export const notebookPalette: Record<FolderMaterial, { color: string; edge: string; ink: string }> = {
-  kraft: { color: "#f05b2c", edge: "#92321f", ink: "#351710" },
-  moss: { color: "#08bd58", edge: "#087238", ink: "#073d22" },
-  clay: { color: "#f0d31b", edge: "#a47c00", ink: "#443700" },
-  charcoal: { color: "#8065df", edge: "#4b3a9d", ink: "#241b59" },
+  kraft: { color: "#df532f", edge: "#762817", ink: "#351710" },
+  moss: { color: "#526f54", edge: "#263f2b", ink: "#122a18" },
+  clay: { color: "#c8a33a", edge: "#705717", ink: "#3d310d" },
+  charcoal: { color: "#485975", edge: "#222e43", ink: "#141c2c" },
 };
 
 export type FieldFolder = {
@@ -24,6 +24,11 @@ export type FieldFolder = {
   createdAt: number;
   updatedAt: number;
   archivedAt?: number;
+};
+
+export type FieldFolderSummary = FieldFolder & {
+  pageCount: number;
+  pagePreviews: Array<{ number: number; text: string }>;
 };
 
 export type JournalSnapshot = {
@@ -189,11 +194,26 @@ export async function ensureLocalLibrary(ownerId = LOCAL_OWNER_ID) {
 }
 
 export async function listFolders(ownerId = LOCAL_OWNER_ID) {
-  return fieldNotesDb.folders
+  const folders = await fieldNotesDb.folders
     .where("ownerId")
     .equals(ownerId)
     .filter((folder) => folder.archivedAt === undefined)
     .sortBy("sortOrder");
+
+  return Promise.all(folders.map(async (folder): Promise<FieldFolderSummary> => {
+    const journal = await fieldNotesDb.journals.get(folder.id);
+    const snapshot = journal?.snapshot;
+    const notebookPages = snapshot
+      ? [...snapshot.pages.map((page) => page.text), snapshot.current]
+      : [""];
+    return {
+      ...folder,
+      pageCount: notebookPages.length,
+      pagePreviews: notebookPages
+        .map((text, index) => ({ number: index + 1, text: text.trim() }))
+        .slice(0, 3),
+    };
+  }));
 }
 
 export async function createFolder(title = "Untitled field notes", ownerId = LOCAL_OWNER_ID) {

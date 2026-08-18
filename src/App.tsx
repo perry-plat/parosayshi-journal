@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { flushSync } from "react-dom";
 import {
-  ArchiveIcon,
-  ArrowLeftIcon,
-  GoogleLogoIcon,
-  PencilSimpleIcon,
   PlusIcon,
+  GoogleLogoIcon,
   SignOutIcon,
 } from "@phosphor-icons/react";
 import type { Session } from "@supabase/supabase-js";
@@ -16,6 +14,7 @@ import {
   createFolder,
   ensureLocalLibrary,
   type FieldFolder,
+  type FieldFolderSummary,
   type JournalSnapshot,
   listFolders,
   LOCAL_OWNER_ID,
@@ -25,7 +24,89 @@ import {
 } from "./lib/fieldNotesDb";
 import { signInWithGoogle, supabase, supabaseConfigured } from "./lib/supabase";
 
-type ProductMode = "threshold" | "folders" | "editor";
+type ProductMode = "threshold" | "naming" | "editor";
+
+// The product currently opens one primary notebook directly. The collection
+// implementation stays intact below so multiple notebooks can be restored by
+// routing back to FolderDesk instead of rebuilding this interaction later.
+type FolderDeskProps = {
+  accountLabel: string;
+  folders: FieldFolderSummary[];
+  onCreate: (title: string) => void;
+  onOpen: (folder: FieldFolder) => void;
+  onSignOut: () => void;
+};
+
+function FolderDesk({ accountLabel, folders, onCreate, onOpen, onSignOut }: FolderDeskProps) {
+  const [composing, setComposing] = useState(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+
+  const submitFolder = () => {
+    const nextTitle = title.trim();
+    if (!nextTitle) return;
+    onCreate(nextTitle);
+    setTitle("");
+    setComposing(false);
+  };
+
+  const openNotebook = (folder: FieldFolderSummary) => {
+    if (openingId) return;
+    const viewTransitionDocument = document as Document & {
+      startViewTransition?: (update: () => void) => { finished: Promise<void> };
+    };
+    if (!viewTransitionDocument.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      onOpen(folder);
+      return;
+    }
+
+    flushSync(() => setOpeningId(folder.id));
+    viewTransitionDocument.startViewTransition(() => {
+      flushSync(() => onOpen(folder));
+    });
+  };
+
+  return (
+    <main className="folder-desk" data-opening={Boolean(openingId)}>
+      <header className="folder-desk__header">
+        <div className="folder-desk__account">
+          <span>{accountLabel}</span>
+          <button aria-label="Sign out" onClick={onSignOut} title="Sign out" type="button"><SignOutIcon size={17} /></button>
+        </div>
+      </header>
+      <section className="folder-desk__collection" aria-label="Your notebooks">
+        <div className="folder-desk__folders">
+          {folders.map((folder, index) => (
+            <article className="field-notebook" data-material={folder.material} data-opening={openingId === folder.id} key={folder.id} style={{ "--notebook-index": index, "--notebook-color": notebookPalette[folder.material].color, "--notebook-edge": notebookPalette[folder.material].edge } as CSSProperties}>
+              <span className="field-notebook__inner" aria-hidden="true" />
+              <span className="field-notebook__paper-peek" aria-hidden="true">
+                {folder.pagePreviews.map((page) => (
+                  <span key={page.number} style={{ viewTransitionName: openingId === folder.id && page.number < folder.pageCount ? `field-note-page-${page.number}` : "none" }}>
+                    <small>{String(page.number).padStart(2, "0")}</small>
+                    {page.text ? <i>{page.text}</i> : null}
+                  </span>
+                ))}
+              </span>
+              <button className="field-notebook__body" onClick={() => openNotebook(folder)} type="button"><strong>{folder.title}</strong></button>
+            </article>
+          ))}
+          <div className="folder-desk__new" data-composing={composing}>
+            {composing ? (
+              <form onSubmit={(event) => { event.preventDefault(); submitFolder(); }}>
+                <label htmlFor="new-folder-title">Notebook name</label>
+                <input autoFocus id="new-folder-title" maxLength={42} onChange={(event) => setTitle(event.target.value)} placeholder="Morning pages" value={title} />
+                <div>
+                  <button type="submit">Make notebook</button>
+                  <button onClick={() => setComposing(false)} type="button">Cancel</button>
+                </div>
+              </form>
+            ) : <button onClick={() => setComposing(true)} type="button"><PlusIcon size={18} /> New notebook</button>}
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
 
 function ProductLight() {
   const reducedMotion = useReducedMotion();
@@ -79,83 +160,41 @@ function ProductThreshold({ onPreview }: { onPreview: () => void }) {
   );
 }
 
-type FolderDeskProps = {
+type NameNotebookProps = {
   accountLabel: string;
-  cloudLabel: string;
-  folders: FieldFolder[];
-  onArchive: (folder: FieldFolder) => void;
-  onCreate: (title: string) => void;
-  onOpen: (folder: FieldFolder) => void;
-  onRename: (folder: FieldFolder) => void;
+  initialTitle: string;
+  onContinue: (title: string) => void | Promise<void>;
   onSignOut: () => void;
 };
 
-function FolderDesk({ accountLabel, cloudLabel, folders, onArchive, onCreate, onOpen, onRename, onSignOut }: FolderDeskProps) {
-  const [composing, setComposing] = useState(false);
-  const [title, setTitle] = useState("");
-
-  const submitFolder = () => {
-    const nextTitle = title.trim();
-    if (!nextTitle) return;
-    onCreate(nextTitle);
-    setTitle("");
-    setComposing(false);
-  };
+function NameNotebook({ accountLabel, initialTitle, onContinue, onSignOut }: NameNotebookProps) {
+  const [title, setTitle] = useState(initialTitle === "Field notes" ? "" : initialTitle);
 
   return (
-    <main className="folder-desk">
+    <main className="product-threshold product-notebook-name">
       <ProductLight />
-      <header className="folder-desk__header">
-        <div>
-          <p className="product-kicker">Private collection</p>
-          <h1>Field Notes</h1>
-        </div>
-        <div className="folder-desk__account">
+      <div className="product-threshold__registration" aria-hidden="true">
+        FIELD NOTES<br />ONE NOTEBOOK / 01
+      </div>
+      <section className="product-threshold__sheet" aria-labelledby="notebook-name-title">
+        <div className="product-threshold__clip" aria-hidden="true" />
+        <p className="product-kicker">Your notebook</p>
+        <h1 id="notebook-name-title">What should we call these notes?</h1>
+        <p className="product-threshold__introduction">This name will live on the cover and in every copy you export.</p>
+        <form className="product-notebook-name__form" onSubmit={(event) => {
+          event.preventDefault();
+          const nextTitle = title.trim();
+          if (nextTitle) void onContinue(nextTitle);
+        }}>
+          <label htmlFor="notebook-title">Notes name</label>
+          <input autoFocus id="notebook-title" maxLength={42} onChange={(event) => setTitle(event.target.value)} placeholder="Things I noticed" value={title} />
+          <button disabled={!title.trim()} type="submit">Open the notebook</button>
+        </form>
+        <div className="product-notebook-name__account">
           <span>{accountLabel}</span>
-          <button aria-label="Sign out" onClick={onSignOut} title="Sign out" type="button"><SignOutIcon size={17} /></button>
-        </div>
-      </header>
-
-      <section className="folder-desk__collection" aria-label="Your notebooks">
-        <div className="folder-desk__legend">
-          <span>NOTEBOOKS / {String(folders.length).padStart(2, "0")}</span>
-          <p>Choose a notebook and lay its papers out.</p>
-        </div>
-        <div className="folder-desk__folders">
-          {folders.map((folder, index) => (
-            <article className="field-notebook" data-material={folder.material} key={folder.id} style={{ "--notebook-index": index, "--notebook-color": notebookPalette[folder.material].color, "--notebook-edge": notebookPalette[folder.material].edge } as CSSProperties}>
-              <div className="field-notebook__pages" aria-hidden="true"><span>{String(index + 1).padStart(2, "0")}</span></div>
-              <button className="field-notebook__body" onClick={() => onOpen(folder)} type="button">
-                <strong>{folder.title}</strong>
-              </button>
-              <div className="field-notebook__actions">
-                <button aria-label={`Rename ${folder.title}`} onClick={() => onRename(folder)} title="Rename notebook" type="button"><PencilSimpleIcon size={15} /></button>
-                <button aria-label={`Archive ${folder.title}`} onClick={() => onArchive(folder)} title="Archive notebook" type="button"><ArchiveIcon size={15} /></button>
-              </div>
-            </article>
-          ))}
-
-          <div className="folder-desk__new" data-composing={composing}>
-            {composing ? (
-              <form onSubmit={(event) => { event.preventDefault(); submitFolder(); }}>
-                <label htmlFor="new-folder-title">Notebook name</label>
-                <input autoFocus id="new-folder-title" maxLength={42} onChange={(event) => setTitle(event.target.value)} placeholder="Morning pages" value={title} />
-                <div>
-                  <button type="submit">Make notebook</button>
-                  <button onClick={() => setComposing(false)} type="button">Cancel</button>
-                </div>
-              </form>
-            ) : (
-              <button onClick={() => setComposing(true)} type="button"><PlusIcon size={18} /> New notebook</button>
-            )}
-          </div>
+          <button onClick={onSignOut} type="button"><SignOutIcon aria-hidden="true" size={14} /> Leave</button>
         </div>
       </section>
-
-      <footer className="folder-desk__footer">
-        <span>SAVED ON THIS DEVICE</span>
-        <span>{cloudLabel}</span>
-      </footer>
     </main>
   );
 }
@@ -165,16 +204,20 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [previewing, setPreviewing] = useState(() => window.sessionStorage.getItem("field-notes:local-preview") === "true");
   const [mode, setMode] = useState<ProductMode>("threshold");
-  const [folders, setFolders] = useState<FieldFolder[]>([]);
   const [activeFolder, setActiveFolder] = useState<FieldFolder | null>(null);
 
   const hasAccess = previewing || Boolean(session);
   const ownerId = session?.user.id ?? LOCAL_OWNER_ID;
   const accountLabel = useMemo(() => session?.user.email || "Local preview", [session]);
 
-  const refreshFolders = useCallback(async () => {
+  const openPrimaryNotebook = useCallback(async () => {
     await ensureLocalLibrary(ownerId);
-    setFolders(await listFolders(ownerId));
+    const [primaryNotebook] = await listFolders(ownerId);
+    if (!primaryNotebook) return;
+    setActiveFolder(primaryNotebook);
+    const isFreshNotebook = primaryNotebook.title === "Field notes"
+      && primaryNotebook.pagePreviews.every((page) => !page.text);
+    setMode(isFreshNotebook ? "naming" : "editor");
   }, [ownerId]);
 
   useEffect(() => {
@@ -200,8 +243,8 @@ export default function App() {
       setMode("threshold");
       return;
     }
-    refreshFolders().then(() => setMode((current) => current === "threshold" ? "folders" : current));
-  }, [hasAccess, refreshFolders]);
+    void openPrimaryNotebook();
+  }, [hasAccess, openPrimaryNotebook]);
 
   const enterPreview = () => {
     window.sessionStorage.setItem("field-notes:local-preview", "true");
@@ -216,24 +259,21 @@ export default function App() {
     setMode("threshold");
   };
 
-  const handleCreate = async (title: string) => {
-    const folder = await createFolder(title, ownerId);
-    await refreshFolders();
-    setActiveFolder(folder);
-    setMode("editor");
-  };
-
   const handleRename = async (folder: FieldFolder) => {
     const title = window.prompt("Rename this notebook", folder.title);
     if (title === null) return;
     await renameFolder(folder.id, title);
-    await refreshFolders();
+    const [updated] = await listFolders(ownerId);
+    if (updated) setActiveFolder(updated);
   };
 
-  const handleArchive = async (folder: FieldFolder) => {
-    if (!window.confirm(`Archive “${folder.title}”? Its papers stay recoverable on this device.`)) return;
-    await archiveFolder(folder.id);
-    await refreshFolders();
+  const nameNotebook = async (title: string) => {
+    if (!activeFolder) return;
+    await renameFolder(activeFolder.id, title);
+    const [updated] = await listFolders(ownerId);
+    if (!updated) return;
+    setActiveFolder(updated);
+    setMode("editor");
   };
 
   const handleJournalChange = useCallback((snapshot: JournalSnapshot) => {
@@ -243,35 +283,28 @@ export default function App() {
 
   if (booting) return <main className="product-boot"><span>FIELD NOTES</span></main>;
   if (!hasAccess || mode === "threshold") return <ProductThreshold onPreview={enterPreview} />;
+  if (mode === "naming" && activeFolder) {
+    return <NameNotebook accountLabel={accountLabel} initialTitle={activeFolder.title} onContinue={nameNotebook} onSignOut={signOut} />;
+  }
 
   if (mode === "editor" && activeFolder) {
     return (
       <>
-        <button className="product-back-to-folders" onClick={() => { setActiveFolder(null); setMode("folders"); }} type="button">
-          <ArrowLeftIcon size={16} /> Notebooks
+        <button className="product-back-to-folders" onClick={signOut} type="button">
+          <SignOutIcon size={15} /> Leave desk
         </button>
         <JournalPrompt
           folderTitle={activeFolder.title}
           journalKey={activeFolder.journalKey}
           notebookMaterial={activeFolder.material}
-          onClose={() => { setActiveFolder(null); setMode("folders"); }}
+          onClose={signOut}
           onJournalChange={handleJournalChange}
+          onRenameNotebook={() => handleRename(activeFolder)}
           promptText={activeFolder.prompt}
         />
       </>
     );
   }
 
-  return (
-    <FolderDesk
-      accountLabel={accountLabel}
-      cloudLabel={session ? "ACCOUNT CONNECTED · SYNC NEXT" : "CLOUD SETUP PENDING"}
-      folders={folders}
-      onArchive={handleArchive}
-      onCreate={handleCreate}
-      onOpen={(folder) => { setActiveFolder(folder); setMode("editor"); }}
-      onRename={handleRename}
-      onSignOut={signOut}
-    />
-  );
+  return <ProductThreshold onPreview={enterPreview} />;
 }

@@ -2,14 +2,15 @@ export const PAGE_WIDTH = 480;
 export const PAGE_HEIGHT = 679;
 export const PDF_WIDTH = 2480;
 export const PDF_HEIGHT = 3508;
+export const HIGHLIGHT_COLOR = "#fff01f";
 
 export const PAGE_TEXT = {
-  fontSize: 12,
+  fontSize: 9.98,
   insetBottom: 45,
-  insetTop: 31,
-  insetX: 42,
-  letterSpacing: -0.15,
-  lineHeight: 21,
+  insetTop: 48,
+  insetX: 60,
+  letterSpacing: -0.12,
+  lineHeight: 13.92,
 } as const;
 
 export type HighlightPoint = {
@@ -35,6 +36,10 @@ export type JournalPageRender = {
   id: string;
   text: string;
 };
+
+function renderedHighlightColor(color: string) {
+  return ["#78e63f", "#f1df45"].includes(color.toLowerCase()) ? HIGHLIGHT_COLOR : color;
+}
 
 type RenderPageOptions = {
   page: JournalPageRender;
@@ -142,13 +147,13 @@ function paintText(
   context.textBaseline = "alphabetic";
   if (showIndex) {
     context.textAlign = "right";
-    context.font = '500 7px "Recursive Variable", "Recursive", sans-serif';
+    context.font = '400 7px "Geist Mono Variable", "Geist Mono", monospace';
     context.fillStyle = "rgb(45 40 35 / 0.72)";
     context.fillText(String(pageNumber).padStart(2, "0"), PAGE_WIDTH - 10, 16);
   }
 
   context.textAlign = "left";
-  context.font = `420 ${PAGE_TEXT.fontSize}px "Recursive Variable", "Recursive", sans-serif`;
+  context.font = `300 ${PAGE_TEXT.fontSize}px "Geist Mono Variable", "Geist Mono", monospace`;
   const metrics = context.measureText("Mg");
   const baselineOffset = (PAGE_TEXT.lineHeight - PAGE_TEXT.fontSize) / 2 + metrics.actualBoundingBoxAscent;
   const lines = canvasTextLines(context, page.text, PAGE_WIDTH - PAGE_TEXT.insetX * 2);
@@ -162,11 +167,11 @@ function paintText(
         const imprintIndex = lineIndex * 127 + characterIndex;
         const hash = Math.imul(seed ^ (imprintIndex + 1), 2654435761) >>> 0;
         context.globalAlpha = tone === "fresh"
-          ? 0.9 + ((hash >>> 16) & 255) / 255 * 0.08
-          : 0.78 + ((hash >>> 16) & 255) / 255 * 0.16;
-        context.fillStyle = tone === "fresh" ? "#221e1b" : "#35312d";
-        context.shadowColor = "rgb(17 12 9 / 0.28)";
-        context.shadowBlur = 0.12 + ((hash >>> 24) & 255) / 255 * 0.28;
+          ? 0.8 + ((hash >>> 16) & 255) / 255 * 0.08
+          : 0.7 + ((hash >>> 16) & 255) / 255 * 0.1;
+        context.fillStyle = tone === "fresh" ? "#292622" : "#35312d";
+        context.shadowColor = "transparent";
+        context.shadowBlur = 0;
         context.fillText(character, x, baseline);
       }
       x += characterWidth;
@@ -303,7 +308,7 @@ export function drawHighlightStroke(context: CanvasRenderingContext2D, stroke: H
   context.rect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
   context.clip();
 
-  context.fillStyle = stroke.color;
+  context.fillStyle = renderedHighlightColor(stroke.color);
   context.globalAlpha = 0.28;
   traceChiselStroke(context, stroke);
   context.fill();

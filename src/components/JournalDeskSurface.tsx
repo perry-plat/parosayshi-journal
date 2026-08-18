@@ -191,7 +191,10 @@ export const JournalDeskSurface = memo(function JournalDeskSurface({
   }
 
   if (surface === "archive-signal") {
-    return <ArchiveSignalSurface archivedCount={archivedCount} />;
+    // Keep the archive-signal experiment available, but the active desk uses
+    // only the matte grid. Restoring the old marks is a one-line swap:
+    // return <ArchiveSignalSurface archivedCount={archivedCount} />;
+    return null;
   }
 
   if (surface === "dither") {

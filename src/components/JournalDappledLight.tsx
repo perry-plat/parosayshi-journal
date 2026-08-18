@@ -84,8 +84,10 @@ export function JournalDappledLight({ reducedMotion }: JournalDappledLightProps)
     camera.position.set(0, 0, 20);
     camera.lookAt(0, 0, 0);
     const receiverMaterial = new THREE.ShadowMaterial({
-      color: 0x211a14,
-      opacity: 0.28,
+      // A darker, less opaque receiver keeps the shadow legible on charcoal
+      // without making the same continuous field too heavy across the paper.
+      color: 0x090807,
+      opacity: 0.22,
       transparent: true,
       depthWrite: false,
     });
