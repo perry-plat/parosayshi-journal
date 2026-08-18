@@ -172,7 +172,6 @@ function ProductThreshold({ onPreview }: { onPreview: () => void }) {
 
 type NameNotebookProps = {
   activeId: string;
-  arriveFromShuffle: boolean;
   folders: FieldFolderSummary[];
   initialTitle: string;
   material: FieldFolder["material"];
@@ -182,9 +181,9 @@ type NameNotebookProps = {
   showFreshNotebook: boolean;
 };
 
-function NameNotebook({ activeId, arriveFromShuffle, folders, initialTitle, material, onContinue, onFreshNotebook, onSelectNotebook, showFreshNotebook }: NameNotebookProps) {
+function NameNotebook({ activeId, folders, initialTitle, material, onContinue, onFreshNotebook, onSelectNotebook, showFreshNotebook }: NameNotebookProps) {
   const [title, setTitle] = useState(initialTitle === "Field notes" ? "" : initialTitle);
-  const [enteredByShuffle] = useState(arriveFromShuffle);
+  const [initialArrival, setInitialArrival] = useState(true);
   const [shuffleTargetId, setShuffleTargetId] = useState<string | null>(null);
   const [slipDragging, setSlipDragging] = useState(false);
   const sceneRef = useRef<HTMLElement>(null);
@@ -192,6 +191,7 @@ function NameNotebook({ activeId, arriveFromShuffle, folders, initialTitle, mate
   const notebookShadowPointerRef = useRef({ x: window.innerWidth * .5, y: window.innerHeight * .5 });
   const reducedMotionQueryRef = useRef<MediaQueryList | null>(null);
   const slipRef = useRef<HTMLElement>(null);
+  const coverRef = useRef<HTMLDivElement>(null);
   const slipOffsetRef = useRef({ x: 0, y: 0 });
   const slipDragRef = useRef<{
     pointerId: number;
@@ -256,6 +256,15 @@ function NameNotebook({ activeId, arriveFromShuffle, folders, initialTitle, mate
     window.cancelAnimationFrame(notebookShadowFrameRef.current);
   }, []);
 
+  useEffect(() => {
+    setTitle(initialTitle === "Field notes" ? "" : initialTitle);
+  }, [activeId, initialTitle]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setInitialArrival(false), 620);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const updateNotebookShadow = (event: ReactPointerEvent<HTMLElement>) => {
     reducedMotionQueryRef.current ??= window.matchMedia("(prefers-reduced-motion: reduce)");
     if (reducedMotionQueryRef.current.matches) return;
@@ -301,8 +310,12 @@ function NameNotebook({ activeId, arriveFromShuffle, folders, initialTitle, mate
                 key={folder.id}
                 onClick={() => {
                   if (shuffleTargetId) return;
+                  setInitialArrival(false);
                   setShuffleTargetId(folder.id);
-                  window.setTimeout(() => onSelectNotebook(folder), 390);
+                  window.setTimeout(() => {
+                    onSelectNotebook(folder);
+                    setShuffleTargetId(null);
+                  }, 390);
                 }}
                 type="button"
               >
@@ -310,36 +323,38 @@ function NameNotebook({ activeId, arriveFromShuffle, folders, initialTitle, mate
               </button>
             ))}
           </div>
-          <div className="product-notebook-name__cover journal-prompt__export-paper journal-prompt__export-paper--cover" data-arrived-by-shuffle={enteredByShuffle} data-shuffling={Boolean(shuffleTargetId)}>
-              <aside
-                className="product-notebook-name__instruction-slip"
-                data-dragging={slipDragging}
-                onPointerCancel={finishSlipDrag}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  slipDragRef.current = {
-                    pointerId: event.pointerId,
-                    notebookRect: event.currentTarget.parentElement?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect(),
-                    startRect: event.currentTarget.getBoundingClientRect(),
-                    startX: event.clientX,
-                    startY: event.clientY,
-                    originX: slipOffsetRef.current.x,
-                    originY: slipOffsetRef.current.y,
-                  };
-                  setSlipDragging(true);
-                }}
-                onPointerMove={moveSlip}
-                onPointerUp={finishSlipDrag}
-                ref={slipRef}
-              >
-                <div className="product-notebook-name__slip-brand">
-                  <img alt="" src={`${import.meta.env.BASE_URL}assets/brand/parosayshi-wordmark.png`} />
-                  <small>@PAROSAYSHI</small>
-                </div>
-                <h1 id="notebook-name-title">Give this notebook a name</h1>
-              </aside>
+          <div className="product-notebook-name__slip-anchor">
+            <aside
+              className="product-notebook-name__instruction-slip"
+              data-dragging={slipDragging}
+              onPointerCancel={finishSlipDrag}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                slipDragRef.current = {
+                  pointerId: event.pointerId,
+                  notebookRect: coverRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect(),
+                  startRect: event.currentTarget.getBoundingClientRect(),
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  originX: slipOffsetRef.current.x,
+                  originY: slipOffsetRef.current.y,
+                };
+                setSlipDragging(true);
+              }}
+              onPointerMove={moveSlip}
+              onPointerUp={finishSlipDrag}
+              ref={slipRef}
+            >
+              <div className="product-notebook-name__slip-brand">
+                <img alt="" src={`${import.meta.env.BASE_URL}assets/brand/parosayshi-wordmark.png`} />
+                <small>@PAROSAYSHI</small>
+              </div>
+              <h1 id="notebook-name-title">Give this notebook a name</h1>
+            </aside>
+          </div>
+          <div className="product-notebook-name__cover journal-prompt__export-paper journal-prompt__export-paper--cover" data-initial-arrival={initialArrival} data-shuffling={Boolean(shuffleTargetId)} ref={coverRef}>
             <NotebookCoverArtwork material={material}>
               <label className="product-visually-hidden" htmlFor="notebook-title">Notebook title</label>
               <input
@@ -437,7 +452,6 @@ export default function App() {
   const [freshBusy, setFreshBusy] = useState(false);
   const [freshDownloadedId, setFreshDownloadedId] = useState<string | null>(null);
   const [returnedFromEditor, setReturnedFromEditor] = useState(false);
-  const [arriveFromShuffle, setArriveFromShuffle] = useState(false);
 
   const hasAccess = LOCAL_ONLY_EDITION || previewing || Boolean(session);
   const ownerId = session?.user.id ?? LOCAL_OWNER_ID;
@@ -592,11 +606,9 @@ export default function App() {
   }, [folders, freshBusy, materialForNewNotebook, ownerId]);
 
   const selectNotebook = useCallback((folder: FieldFolderSummary) => {
-    setArriveFromShuffle(true);
     setActiveFolder(folder);
     setReturnedFromEditor(true);
     setFreshDialogOpen(false);
-    window.setTimeout(() => setArriveFromShuffle(false), 0);
   }, []);
 
   if (booting) return <main className="product-boot"><span>FIELD NOTES</span></main>;
@@ -605,7 +617,7 @@ export default function App() {
   if (mode === "naming" && activeFolder) {
     return (
       <>
-        <NameNotebook activeId={activeFolder.id} arriveFromShuffle={arriveFromShuffle} folders={folders} initialTitle={activeFolder.title} key={activeFolder.id} material={activeFolder.material} onContinue={nameNotebook} onFreshNotebook={() => void addNotebook()} onSelectNotebook={selectNotebook} showFreshNotebook={returnedFromEditor} />
+        <NameNotebook activeId={activeFolder.id} folders={folders} initialTitle={activeFolder.title} material={activeFolder.material} onContinue={nameNotebook} onFreshNotebook={() => void addNotebook()} onSelectNotebook={selectNotebook} showFreshNotebook={returnedFromEditor} />
         {returnedFromEditor && freshDialogOpen ? (
           <FreshNotebookDialog
             busy={freshBusy}

@@ -207,6 +207,16 @@ button { -webkit-tap-highlight-color: transparent; }
   pointer-events: none;
   transform: translateX(-50%);
 }
+.product-notebook-name__slip-anchor {
+  position: absolute;
+  top: var(--onboarding-notebook-top);
+  left: 50%;
+  z-index: 1;
+  width: var(--onboarding-notebook-width);
+  aspect-ratio: 1 / 1.414;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
 .product-notebook-name__stack-back {
   position: absolute;
   inset: 0;
@@ -239,7 +249,6 @@ button { -webkit-tap-highlight-color: transparent; }
   z-index: 2;
   width: var(--onboarding-notebook-width);
   aspect-ratio: 1 / 1.414;
-  animation: product-notebook-arrive 620ms cubic-bezier(.18,.82,.22,1) both;
   border-radius: 5px 26px 26px 5px;
   box-shadow:
     var(--notebook-contact-x) var(--notebook-contact-y) 7px -2px rgb(0 0 0 / 17%),
@@ -249,7 +258,7 @@ button { -webkit-tap-highlight-color: transparent; }
   transition: box-shadow 150ms ease-out;
   overflow: visible;
 }
-.product-notebook-name__cover[data-arrived-by-shuffle="true"] { animation: none; }
+.product-notebook-name__cover[data-initial-arrival="true"] { animation: product-notebook-arrive 620ms cubic-bezier(.18,.82,.22,1) both; }
 .product-notebook-name__cover[data-shuffling="true"] { animation: product-notebook-front-to-back 390ms cubic-bezier(.45,.05,.18,1) both; pointer-events: none; }
 .product-notebook-name__form[data-shuffling="true"] .product-notebook-name__actions { opacity: .28; pointer-events: none; transition: opacity 110ms ease; }
 .product-notebook-name__instruction-slip {
@@ -276,6 +285,7 @@ button { -webkit-tap-highlight-color: transparent; }
   clip-path: polygon(.4% .8%, 99.6% 0, 100% 99.1%, .8% 100%, 0 64%);
   cursor: grab;
   font-family: var(--product-ui-font);
+  pointer-events: auto;
   touch-action: none;
   transform: translate(var(--slip-drag-x), var(--slip-drag-y)) rotate(1.2deg) scale(var(--slip-scale));
   transform-origin: 50% 50%;
