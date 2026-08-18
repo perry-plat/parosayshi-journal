@@ -357,7 +357,7 @@ function FreshNotebookDialog({ busy, downloaded, onClose, onCreate, onDownload, 
           <ul className="product-fresh-notebook__facts">
             <li><WarningCircleIcon aria-hidden="true" size={17} /><span>Replaces the notebook on this desk</span></li>
             <li><CloudSlashIcon aria-hidden="true" size={17} /><span>No cloud backup</span></li>
-            <li><i aria-hidden="true" className="product-fresh-notebook__cover-swatch" /><span>Current notebook stays in this browser only<br /><small>Cannot be reopened here yet</small></span></li>
+            <li><i aria-hidden="true" className="product-fresh-notebook__cover-swatch" /><span>Download the current notebook to keep it</span></li>
           </ul>
         )}
         {pageCount !== null ? (
@@ -443,6 +443,9 @@ export default function App() {
     const [updated] = await listFolders(ownerId);
     if (!updated) return;
     setActiveFolder(updated);
+    setFreshDialogOpen(false);
+    setFreshPageCount(null);
+    setFreshSnapshot(null);
     setReturnedFromEditor(false);
     setMode("editor");
   };
@@ -510,7 +513,7 @@ export default function App() {
     return (
       <>
         <NameNotebook initialTitle={activeFolder.title} key={activeFolder.id} material={activeFolder.material} onContinue={nameNotebook} onFreshNotebook={() => void openFreshDialog()} showFreshNotebook={returnedFromEditor} />
-        {freshDialogOpen ? (
+        {returnedFromEditor && freshDialogOpen ? (
           <FreshNotebookDialog
             busy={freshBusy}
             downloaded={freshDownloaded}
@@ -531,6 +534,9 @@ export default function App() {
         journalKey={activeFolder.journalKey}
         notebookMaterial={activeFolder.material}
         onHome={() => {
+          setFreshDialogOpen(false);
+          setFreshPageCount(null);
+          setFreshSnapshot(null);
           setReturnedFromEditor(true);
           setMode("naming");
         }}

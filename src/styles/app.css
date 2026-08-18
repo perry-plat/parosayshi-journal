@@ -305,7 +305,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .product-fresh-notebook__facts li { display: grid; grid-template-columns: 20px 1fr; align-items: start; gap: 8px; font: 450 12px/1.3 var(--product-action-font); letter-spacing: -.015em; }
 .product-fresh-notebook__facts svg { margin-top: -1px; color: rgb(36 34 30 / .56); }
 .product-fresh-notebook__cover-swatch { display: block; width: 15px; height: 19px; margin: -2px 0 0 1px; background-color: #ef3b1d; background-image: url("/assets/textures/journal-cover-fiber-orange-v1.jpg"); background-position: center; background-size: cover; border-radius: 1px 3px 3px 1px; box-shadow: 0 1px 2px rgb(36 34 30 / .22); }
-.product-fresh-notebook__facts small { color: rgb(36 34 30 / .5); font: 450 10px/1.35 var(--product-ui-font); }
 .product-fresh-notebook__actions { display: flex; align-items: stretch; gap: 8px; margin-top: 20px; }
 .product-fresh-notebook__actions button { min-height: 46px; flex: 1; padding: 10px 16px; color: #292722; background: transparent; border: 1px solid rgb(41 39 34 / .3); border-radius: 999px; cursor: pointer; font-family: var(--product-action-font); font-size: 13px; font-weight: 520; letter-spacing: -.015em; }
 .product-fresh-notebook__actions button:hover:not(:disabled) { background: rgb(41 39 34 / .08); }
