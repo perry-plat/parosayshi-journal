@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArchiveIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, EraserIcon, HouseIcon, ListIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
+import { ArchiveIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, EraserIcon, HouseIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
 import { Notebook01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useReducedMotion } from "../hooks/useReducedMotion";
@@ -53,13 +53,18 @@ type ArchivedPage = {
 
 type PageDrag = {
   element: HTMLButtonElement;
+  frameId: number;
   id: string;
   lastAt: number;
   lastClientX: number;
+  localWidth: number;
   moved: boolean;
   originX: number;
   originY: number;
+  pendingClientX: number;
+  pendingClientY: number;
   pointerId: number;
+  raisedOrder: number;
   startRect: DOMRect;
   startX: number;
   startY: number;
@@ -153,8 +158,9 @@ function placeArchivedIndex(
   element: HTMLElement,
   rect: Pick<DOMRect, "left" | "right" | "width"> = element.getBoundingClientRect(),
   deltaX = 0,
+  measuredWidth = element.offsetWidth,
 ) {
-  const localWidth = element.offsetWidth;
+  const localWidth = measuredWidth;
   if (!localWidth || !rect.width) return;
   const left = rect.left + deltaX;
   const right = rect.right + deltaX;
@@ -162,6 +168,31 @@ function placeArchivedIndex(
   const localX = (visibleRight - left) / rect.width * localWidth;
   const clampedX = Math.min(localWidth - 12, Math.max(32, localX));
   element.style.setProperty("--page-index-x", `${clampedX.toFixed(2)}px`);
+}
+
+function applyPageDragFrame(drag: PageDrag, clientX: number, clientY: number) {
+  const rawX = clientX - drag.startX;
+  const rawY = clientY - drag.startY;
+  if (Math.hypot(rawX, rawY) > 4) drag.moved = true;
+  const delta = clampedPageDelta(drag.startRect, rawX, rawY);
+  const now = performance.now();
+  const elapsed = Math.max(8, now - drag.lastAt);
+  const horizontalVelocity = (clientX - drag.lastClientX) / elapsed;
+  const targetTilt = Math.max(-1.05, Math.min(1.05, horizontalVelocity * 2.65));
+  const smoothing = 1 - Math.exp(-elapsed / 68);
+  drag.tilt += (targetTilt - drag.tilt) * smoothing;
+
+  // Keep every visual write together on a single animation frame. In
+  // particular, avoid reading offsetWidth after the position writes: that
+  // forced a synchronous layout on every pointer event.
+  drag.element.style.setProperty("--page-drag-x", `${drag.originX + delta.x}px`);
+  drag.element.style.setProperty("--page-drag-y", `${drag.originY + delta.y}px`);
+  drag.element.style.setProperty("--page-drag-rotation", `${drag.tilt.toFixed(2)}deg`);
+  placeArchivedIndex(drag.element, drag.startRect, delta.x, drag.localWidth);
+
+  drag.lastAt = now;
+  drag.lastClientX = clientX;
+  return delta;
 }
 
 function paperPose(element: HTMLElement): PaperPose {
@@ -858,6 +889,8 @@ type JournalPromptProps = {
 
 export function NotebookCoverArtwork({ children, inside = false, material, title }: { children?: ReactNode; inside?: boolean; material: FolderMaterial; title?: string }) {
   const palette = notebookPalette[material];
+  const resolvedTitle = title?.trim();
+  const visibleTitle = resolvedTitle?.toLocaleLowerCase() === "field notes" ? undefined : resolvedTitle;
   return (
     <div
       className="journal-prompt__notebook-cover-art"
@@ -865,7 +898,7 @@ export function NotebookCoverArtwork({ children, inside = false, material, title
       data-material={material}
       style={{ "--notebook-cover-color": palette.color, "--notebook-cover-edge": palette.edge, "--notebook-cover-ink": palette.ink } as React.CSSProperties}
     >
-      <strong>{children ?? title}</strong>
+      <strong>{children ?? visibleTitle}</strong>
     </div>
   );
 }
@@ -1022,7 +1055,6 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   const paperSwitchRef = useRef(0);
   const deskArrangeTimerRef = useRef<number | null>(null);
   const markerVisibilityTimerRef = useRef<number | null>(null);
-  const toolMenuRef = useRef<HTMLDivElement | null>(null);
   const soundRef = useRef<ReturnType<typeof createDeskSound> | null>(null);
   const reducedMotion = useReducedMotion();
   const [promptIndex] = useState(() => daySeed() % prompts.length);
@@ -1071,7 +1103,6 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     }
   });
   const [deskArranging, setDeskArranging] = useState(false);
-  const [toolMenuOpen, setToolMenuOpen] = useState(false);
   const activeArchivedPage = activeArchivedId
     ? pages.find((page) => page.id === activeArchivedId) ?? null
     : null;
@@ -1082,14 +1113,6 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     return () => window.clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    if (!toolMenuOpen) return;
-    const closeToolMenu = (event: PointerEvent) => {
-      if (!toolMenuRef.current?.contains(event.target as Node)) setToolMenuOpen(false);
-    };
-    window.addEventListener("pointerdown", closeToolMenu);
-    return () => window.removeEventListener("pointerdown", closeToolMenu);
-  }, [toolMenuOpen]);
 
   useEffect(() => {
     if (exportPreviewOpen) void import("pdf-lib");
@@ -1098,6 +1121,9 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   useEffect(() => () => {
     if (markerVisibilityTimerRef.current !== null) {
       window.clearTimeout(markerVisibilityTimerRef.current);
+    }
+    if (pageDragRef.current?.frameId) {
+      window.cancelAnimationFrame(pageDragRef.current.frameId);
     }
   }, []);
 
@@ -1894,6 +1920,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
 
   const toggleDeskOrder = () => {
     if (deskArrangeTimerRef.current !== null) window.clearTimeout(deskArrangeTimerRef.current);
+    if (pageDragRef.current?.frameId) window.cancelAnimationFrame(pageDragRef.current.frameId);
     pageDragRef.current = null;
     setDraggingPageId(null);
     setDeskArranging(true);
@@ -2080,9 +2107,10 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
               onPointerCancel={(event) => {
                 const drag = pageDragRef.current;
                 if (!drag || drag.id !== page.id || drag.pointerId !== event.pointerId) return;
+                window.cancelAnimationFrame(drag.frameId);
                 drag.element.style.setProperty("--page-drag-x", `${drag.originX}px`);
                 drag.element.style.setProperty("--page-drag-y", `${drag.originY}px`);
-                placeArchivedIndex(drag.element, drag.startRect);
+                placeArchivedIndex(drag.element, drag.startRect, 0, drag.localWidth);
                 pageDragRef.current = null;
                 setDraggingPageId(null);
                 window.requestAnimationFrame(() => {
@@ -2095,63 +2123,58 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 const immediateOrder = nextDeskOrder(pages);
                 element.style.setProperty("--page-layer", String(immediateOrder));
                 element.setPointerCapture(event.pointerId);
-                setPages((current) => {
-                  const raisedOrder = Math.max(immediateOrder, nextDeskOrder(current));
-                  return current.map((entry) => (
-                    entry.id === page.id ? { ...entry, deskOrder: raisedOrder } : entry
-                  ));
-                });
+                const startRect = element.getBoundingClientRect();
+                const localWidth = element.offsetWidth;
                 pageDragRef.current = {
                   element,
+                  frameId: 0,
                   id: page.id,
                   lastAt: performance.now(),
                   lastClientX: event.clientX,
+                  localWidth,
                   moved: false,
                   originX: page.deskX ?? 0,
                   originY: page.deskY ?? 0,
+                  pendingClientX: event.clientX,
+                  pendingClientY: event.clientY,
                   pointerId: event.pointerId,
-                  startRect: element.getBoundingClientRect(),
+                  raisedOrder: immediateOrder,
+                  startRect,
                   startX: event.clientX,
                   startY: event.clientY,
                   tilt: 0,
                 };
-                placeArchivedIndex(element);
+                placeArchivedIndex(element, startRect, 0, localWidth);
                 setDraggingPageId(page.id);
               }}
               onPointerMove={(event) => {
                 const drag = pageDragRef.current;
                 if (!drag || drag.id !== page.id || drag.pointerId !== event.pointerId) return;
-                const rawX = event.clientX - drag.startX;
-                const rawY = event.clientY - drag.startY;
-                if (Math.hypot(rawX, rawY) > 4) drag.moved = true;
-                const delta = clampedPageDelta(drag.startRect, rawX, rawY);
-                drag.element.style.setProperty("--page-drag-x", `${drag.originX + delta.x}px`);
-                drag.element.style.setProperty("--page-drag-y", `${drag.originY + delta.y}px`);
-                placeArchivedIndex(drag.element, drag.startRect, delta.x);
-                const now = performance.now();
-                const elapsed = Math.max(8, now - drag.lastAt);
-                const horizontalVelocity = (event.clientX - drag.lastClientX) / elapsed;
-                const targetTilt = Math.max(-1.05, Math.min(1.05, horizontalVelocity * 2.65));
-                const smoothing = 1 - Math.exp(-elapsed / 68);
-                drag.tilt += (targetTilt - drag.tilt) * smoothing;
-                drag.element.style.setProperty("--page-drag-rotation", `${drag.tilt.toFixed(2)}deg`);
-                drag.lastAt = now;
-                drag.lastClientX = event.clientX;
+                const coalesced = event.nativeEvent.getCoalescedEvents?.();
+                const latest = coalesced?.[coalesced.length - 1] ?? event.nativeEvent;
+                drag.pendingClientX = latest.clientX;
+                drag.pendingClientY = latest.clientY;
+                if (drag.frameId) return;
+                drag.frameId = window.requestAnimationFrame(() => {
+                  drag.frameId = 0;
+                  if (pageDragRef.current !== drag) return;
+                  applyPageDragFrame(drag, drag.pendingClientX, drag.pendingClientY);
+                });
               }}
               onPointerUp={(event) => {
                 const drag = pageDragRef.current;
                 if (!drag || drag.id !== page.id || drag.pointerId !== event.pointerId) return;
-                const rawX = event.clientX - drag.startX;
-                const rawY = event.clientY - drag.startY;
-                const delta = clampedPageDelta(drag.startRect, rawX, rawY);
-                placeArchivedIndex(drag.element, drag.startRect, delta.x);
-                if (drag.moved) {
-                  setPages((current) => current.map((entry) => (
-                    entry.id === page.id
-                      ? { ...entry, deskX: drag.originX + delta.x, deskY: drag.originY + delta.y }
-                      : entry
-                  )));
-                }
+                window.cancelAnimationFrame(drag.frameId);
+                const delta = applyPageDragFrame(drag, event.clientX, event.clientY);
+                setPages((current) => current.map((entry) => (
+                  entry.id === page.id
+                    ? {
+                      ...entry,
+                      deskOrder: drag.raisedOrder,
+                      ...(drag.moved ? { deskX: drag.originX + delta.x, deskY: drag.originY + delta.y } : {}),
+                    }
+                    : entry
+                )));
                 if (drag.element.hasPointerCapture(event.pointerId)) drag.element.releasePointerCapture(event.pointerId);
                 pageDragRef.current = null;
                 setDraggingPageId(null);
@@ -2369,15 +2392,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           {onArchiveNotebook ? <button aria-label="Archive notebook" onClick={onArchiveNotebook} title="Archive notebook" type="button"><ArchiveIcon aria-hidden="true" size={17} />Archive</button> : null}
         </div> : null}
 
-        <div className="journal-prompt__tools" aria-label="Writing tools" ref={toolMenuRef}>
-          {onHome && toolMenuOpen ? (
-            <div className="journal-prompt__tool-popover" role="menu">
-              <button aria-label="Go to notebook cover" onClick={() => { setToolMenuOpen(false); onHome(); }} role="menuitem" type="button">
-                <HouseIcon aria-hidden="true" size={17} />
-                <span>Home</span>
-              </button>
-            </div>
-          ) : null}
+        <div className="journal-prompt__tools" aria-label="Writing tools">
           <div className="journal-prompt__tool-menu" role="toolbar">
             <button
               aria-label={eraserActive ? "Stop erasing" : "Erase highlights"}
@@ -2410,8 +2425,8 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
             </button>
             <button aria-label="Keep a copy" data-help="Keep a copy" data-tool="keep" disabled={!exportSheets.length} onClick={() => { setExportPageIndex(0); setExportTurningIndex(null); setExportPreviewOpen(true); }} type="button"><HugeiconsIcon aria-hidden="true" color="currentColor" icon={Notebook01Icon} size={18} strokeWidth={1.5} /></button>
             {onHome ? (
-              <button aria-expanded={toolMenuOpen} aria-haspopup="menu" aria-label="Open menu" data-help="Menu" data-tool="menu" onClick={() => setToolMenuOpen((open) => !open)} type="button">
-                <ListIcon aria-hidden="true" size={19} />
+              <button aria-label="Go to notebook cover" data-help="Home" data-tool="home" onClick={onHome} type="button">
+                <HouseIcon aria-hidden="true" size={19} />
               </button>
             ) : null}
           </div>
