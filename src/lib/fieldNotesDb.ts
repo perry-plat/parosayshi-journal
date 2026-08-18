@@ -4,12 +4,13 @@ export const FIELD_NOTES_DRAFTS_KEY = "field-notes:journal-drafts";
 export const LOCAL_OWNER_ID = "local-preview";
 
 export type FolderMaterial = "kraft" | "moss" | "clay" | "charcoal";
+type FolderOrigin = "starter" | "user";
 
 export const notebookPalette: Record<FolderMaterial, { color: string; edge: string; ink: string }> = {
   kraft: { color: "#df532f", edge: "#762817", ink: "#351710" },
   moss: { color: "#526f54", edge: "#263f2b", ink: "#122a18" },
   clay: { color: "#c8a33a", edge: "#705717", ink: "#3d310d" },
-  charcoal: { color: "#485975", edge: "#222e43", ink: "#141c2c" },
+  charcoal: { color: "#2761b5", edge: "#173b78", ink: "#0d2347" },
 };
 
 export type FieldFolder = {
@@ -24,6 +25,7 @@ export type FieldFolder = {
   createdAt: number;
   updatedAt: number;
   archivedAt?: number;
+  origin?: FolderOrigin;
 };
 
 export type FieldFolderSummary = FieldFolder & {
@@ -126,8 +128,97 @@ function readLegacyDrafts() {
   }
 }
 
+function mergeLegacyDrafts(legacy: Array<[string, JournalSnapshot]>): [string, JournalSnapshot] | null {
+  const first = legacy[0];
+  if (!first) return null;
+
+  const [journalKey, firstSnapshot] = first;
+  const carriedPages = [
+    ...firstSnapshot.pages,
+    ...legacy.slice(1).flatMap(([, snapshot]) => [
+      ...snapshot.pages,
+      {
+        id: snapshot.currentId,
+        slot: 0,
+        text: snapshot.current,
+      },
+    ]),
+  ].map((page, index) => ({ ...page, slot: index }));
+
+  return [journalKey, {
+    current: firstSnapshot.current,
+    currentId: firstSnapshot.currentId,
+    pages: carriedPages,
+  }];
+}
+
+function mergeSnapshots(snapshots: JournalSnapshot[]) {
+  const first = snapshots[0];
+  if (!first) return { current: "", currentId: makeId("page"), pages: [] } satisfies JournalSnapshot;
+
+  const carriedPages = [
+    ...first.pages,
+    ...snapshots.slice(1).flatMap((snapshot) => [
+      ...snapshot.pages,
+      { id: snapshot.currentId, slot: 0, text: snapshot.current },
+    ]),
+  ].map((page, index) => ({ ...page, slot: index }));
+
+  return { current: first.current, currentId: first.currentId, pages: carriedPages } satisfies JournalSnapshot;
+}
+
+async function migrateSingleNotebookDefault(ownerId: string) {
+  const migrationKey = `single-notebook-default-v2:${ownerId}`;
+  if (await fieldNotesDb.meta.get(migrationKey)) return;
+
+  const folders = await fieldNotesDb.folders
+    .where("ownerId")
+    .equals(ownerId)
+    .filter((folder) => folder.archivedAt === undefined)
+    .sortBy("sortOrder");
+  if (folders.length === 0) return;
+
+  // A folder created by the Add notebook action is intentional. Older records
+  // did not carry provenance, so multiple origin-less folders are the legacy
+  // auto-import bug this migration repairs.
+  if (folders.some((folder) => folder.origin === "user")) {
+    await fieldNotesDb.meta.put({ key: migrationKey, value: new Date().toISOString() });
+    return;
+  }
+
+  const [primary, ...duplicates] = folders;
+  const journals = (await Promise.all(folders.map((folder) => fieldNotesDb.journals.get(folder.id))))
+    .filter((journal): journal is StoredJournal => Boolean(journal));
+  const now = Date.now();
+  const snapshot = mergeSnapshots(journals.map((journal) => journal.snapshot));
+
+  await fieldNotesDb.transaction("rw", fieldNotesDb.folders, fieldNotesDb.journals, fieldNotesDb.outbox, fieldNotesDb.meta, async () => {
+    await fieldNotesDb.folders.put({
+      ...primary,
+      material: "kraft",
+      origin: "starter",
+      sortOrder: 0,
+      updatedAt: now,
+    });
+    await fieldNotesDb.journals.put({
+      id: primary.id,
+      folderId: primary.id,
+      ownerId,
+      snapshot,
+      revision: (journals.find((journal) => journal.folderId === primary.id)?.revision ?? 0) + 1,
+      updatedAt: now,
+    });
+    for (const duplicate of duplicates) {
+      await fieldNotesDb.folders.delete(duplicate.id);
+      await fieldNotesDb.journals.delete(duplicate.id);
+      await fieldNotesDb.outbox.where("entityId").equals(duplicate.id).delete();
+    }
+    await fieldNotesDb.meta.put({ key: migrationKey, value: new Date(now).toISOString() });
+  });
+}
+
 function materialFor(index: number): FolderMaterial {
-  return (["kraft", "moss", "clay", "charcoal"] as const)[index % 4];
+  return (["kraft", "charcoal", "moss", "clay"] as const)[index % 4];
 }
 
 async function queueChange(change: Omit<PendingChange, "id" | "createdAt">) {
@@ -140,7 +231,10 @@ async function queueChange(change: Omit<PendingChange, "id" | "createdAt">) {
 
 export async function ensureLocalLibrary(ownerId = LOCAL_OWNER_ID) {
   const existing = await fieldNotesDb.folders.where("ownerId").equals(ownerId).count();
-  if (existing > 0) return;
+  if (existing > 0) {
+    await migrateSingleNotebookDefault(ownerId);
+    return;
+  }
 
   if (ownerId !== LOCAL_OWNER_ID) {
     const localFolders = await fieldNotesDb.folders.where("ownerId").equals(LOCAL_OWNER_ID).toArray();
@@ -154,42 +248,49 @@ export async function ensureLocalLibrary(ownerId = LOCAL_OWNER_ID) {
         const pending = await fieldNotesDb.outbox.where("ownerId").equals(LOCAL_OWNER_ID).toArray();
         for (const change of pending) await fieldNotesDb.outbox.put({ ...change, ownerId });
       });
+      await migrateSingleNotebookDefault(ownerId);
       return;
     }
   }
 
   const now = Date.now();
-  const legacy = readLegacyDrafts();
-  const sources = legacy.length > 0
-    ? legacy
-    : [[starterPrompts[0], { current: "", currentId: makeId("page"), pages: [] }] as [string, JournalSnapshot]];
+  const legacyNotebook = mergeLegacyDrafts(readLegacyDrafts());
+  const source = legacyNotebook
+    ?? [starterPrompts[0], { current: "", currentId: makeId("page"), pages: [] }] as [string, JournalSnapshot];
 
   await fieldNotesDb.transaction("rw", fieldNotesDb.folders, fieldNotesDb.journals, fieldNotesDb.meta, async () => {
-    for (const [index, [journalKey, snapshot]] of sources.entries()) {
-      const id = makeId("folder");
-      const folder: FieldFolder = {
-        id,
-        ownerId,
-        title: index === 0 ? "Field notes" : `Recovered notebook ${String(index + 1).padStart(2, "0")}`,
-        note: index === 0 ? "Loose observations" : "Recovered from this browser",
-        material: materialFor(index),
-        journalKey,
-        prompt: journalKey,
-        sortOrder: index,
-        createdAt: now + index,
-        updatedAt: now + index,
-      };
-      await fieldNotesDb.folders.add(folder);
-      await fieldNotesDb.journals.add({
-        id,
-        folderId: id,
-        ownerId,
-        snapshot,
-        revision: 1,
-        updatedAt: now,
-      });
-    }
+    // React StrictMode and multiple tabs can ask for the starter notebook at
+    // the same time. Rechecking inside the write transaction makes creation
+    // atomic across both calls and browser tabs.
+    const concurrentlyCreated = await fieldNotesDb.folders.where("ownerId").equals(ownerId).count();
+    if (concurrentlyCreated > 0) return;
+
+    const [journalKey, snapshot] = source;
+    const id = makeId("folder");
+    const folder: FieldFolder = {
+      id,
+      ownerId,
+      title: "Field notes",
+      note: "Loose observations",
+      material: materialFor(0),
+      journalKey,
+      prompt: journalKey,
+      sortOrder: 0,
+      createdAt: now,
+      updatedAt: now,
+      origin: "starter",
+    };
+    await fieldNotesDb.folders.add(folder);
+    await fieldNotesDb.journals.add({
+      id,
+      folderId: id,
+      ownerId,
+      snapshot,
+      revision: 1,
+      updatedAt: now,
+    });
     await fieldNotesDb.meta.put({ key: "legacy-migration", value: new Date(now).toISOString() });
+    await fieldNotesDb.meta.put({ key: `single-notebook-default-v2:${ownerId}`, value: new Date(now).toISOString() });
   });
 }
 
@@ -220,7 +321,11 @@ export async function getJournalSnapshot(folderId: string) {
   return (await fieldNotesDb.journals.get(folderId))?.snapshot ?? null;
 }
 
-export async function createFolder(title = "Untitled field notes", ownerId = LOCAL_OWNER_ID) {
+export async function createFolder(
+  title = "Untitled field notes",
+  ownerId = LOCAL_OWNER_ID,
+  material?: FolderMaterial,
+) {
   const folders = await listFolders(ownerId);
   const now = Date.now();
   const id = makeId("folder");
@@ -230,12 +335,13 @@ export async function createFolder(title = "Untitled field notes", ownerId = LOC
     ownerId,
     title,
     note: "New collection",
-    material: materialFor(folders.length),
+    material: material ?? materialFor(folders.length),
     journalKey: `field-notes:folder:${id}`,
     prompt,
     sortOrder: folders.length,
     createdAt: now,
     updatedAt: now,
+    origin: "user",
   };
   await fieldNotesDb.folders.add(folder);
   await fieldNotesDb.journals.add({
@@ -264,6 +370,7 @@ export async function rolloverNotebook(current: FieldFolder) {
     sortOrder: current.sortOrder,
     createdAt: now,
     updatedAt: now,
+    origin: current.origin ?? "user",
   };
   const archivedFolder = { ...current, archivedAt: now, updatedAt: now };
   await fieldNotesDb.transaction("rw", fieldNotesDb.folders, fieldNotesDb.journals, fieldNotesDb.outbox, async () => {
@@ -297,6 +404,14 @@ export async function archiveFolder(id: string) {
   const next = { ...folder, archivedAt: Date.now(), updatedAt: Date.now() };
   await fieldNotesDb.folders.put(next);
   await queueChange({ ownerId: next.ownerId, entity: "folder", entityId: id, operation: "archive", payload: next });
+}
+
+export async function deleteFolder(id: string) {
+  await fieldNotesDb.transaction("rw", fieldNotesDb.folders, fieldNotesDb.journals, fieldNotesDb.outbox, async () => {
+    await fieldNotesDb.folders.delete(id);
+    await fieldNotesDb.journals.delete(id);
+    await fieldNotesDb.outbox.where("entityId").equals(id).delete();
+  });
 }
 
 export async function saveJournalSnapshot(folder: FieldFolder, snapshot: JournalSnapshot) {

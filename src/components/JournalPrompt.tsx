@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArchiveIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, EraserIcon, HouseIcon, ListIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
 import { Notebook01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { PDFDocument } from "pdf-lib";
 import { useReducedMotion } from "../hooks/useReducedMotion";
-import { JournalDeskSurface } from "./JournalDeskSurface";
-import { JournalDappledLight } from "./JournalDappledLight";
+import { JournalDeskSurface } from "./JournalDeskSurfaceActive";
+import { DeferredJournalDappledLight } from "./DeferredJournalDappledLight";
 import { notebookPalette, type FolderMaterial, type JournalSnapshot } from "../lib/fieldNotesDb";
 import { JournalInkLayer, type HighlighterMotion } from "./JournalInkLayer";
 import {
@@ -234,7 +233,7 @@ function canvasTextLines(
   return lines;
 }
 
-function ArchivedPagePreview({ densityCap = 2, page, pageNumber, showIndex = true, tone = "archived" }: { densityCap?: number; page: ArchivedPage; pageNumber: number; showIndex?: boolean; tone?: "archived" | "fresh" }) {
+const ArchivedPagePreview = memo(function ArchivedPagePreview({ densityCap = 2, page, pageNumber, showIndex = true, tone = "archived" }: { densityCap?: number; page: ArchivedPage; pageNumber: number; showIndex?: boolean; tone?: "archived" | "fresh" }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -242,6 +241,7 @@ function ArchivedPagePreview({ densityCap = 2, page, pageNumber, showIndex = tru
     if (!canvas) return;
     let frame = 0;
     let cancelled = false;
+    let visible = true;
 
     const draw = () => {
       frame = 0;
@@ -374,24 +374,32 @@ function ArchivedPagePreview({ densityCap = 2, page, pageNumber, showIndex = tru
     };
 
     const scheduleDraw = () => {
+      if (!visible) return;
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(draw);
     };
     const observer = new ResizeObserver(scheduleDraw);
+    const visibilityObserver = new IntersectionObserver(([entry]) => {
+      visible = entry?.isIntersecting ?? true;
+      if (visible) scheduleDraw();
+      else window.cancelAnimationFrame(frame);
+    }, { rootMargin: "160px" });
     observer.observe(canvas);
+    visibilityObserver.observe(canvas);
     void document.fonts.ready.then(scheduleDraw);
 
     return () => {
       cancelled = true;
       observer.disconnect();
+      visibilityObserver.disconnect();
       window.cancelAnimationFrame(frame);
     };
   }, [densityCap, page.id, page.text, pageNumber, showIndex, tone]);
 
   return <canvas aria-hidden="true" className="journal-prompt__archived-preview" ref={canvasRef} />;
-}
+});
 
-function InkedPagePreview({
+const InkedPagePreview = memo(function InkedPagePreview({
   densityCap = 2,
   page,
   pageNumber,
@@ -413,6 +421,7 @@ function InkedPagePreview({
     if (!canvas) return;
     let frame = 0;
     let cancelled = false;
+    let visible = true;
     const draw = () => {
       frame = 0;
       if (cancelled) return;
@@ -424,21 +433,37 @@ function InkedPagePreview({
       renderJournalPage(context, { page, pageNumber, showIndex, strokes, tone });
     };
     const scheduleDraw = () => {
+      if (!visible) return;
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(draw);
     };
     const observer = new ResizeObserver(scheduleDraw);
+    const visibilityObserver = new IntersectionObserver(([entry]) => {
+      visible = entry?.isIntersecting ?? true;
+      if (visible) scheduleDraw();
+      else window.cancelAnimationFrame(frame);
+    }, { rootMargin: "160px" });
     observer.observe(canvas);
+    visibilityObserver.observe(canvas);
     void document.fonts.ready.then(scheduleDraw);
     return () => {
       cancelled = true;
       observer.disconnect();
+      visibilityObserver.disconnect();
       window.cancelAnimationFrame(frame);
     };
   }, [densityCap, page, pageNumber, showIndex, strokes, tone]);
 
   return <canvas aria-hidden="true" className="journal-prompt__archived-preview" ref={canvasRef} />;
-}
+}, (previous, next) => (
+  previous.densityCap === next.densityCap
+  && previous.page === next.page
+  && previous.pageNumber === next.pageNumber
+  && previous.showIndex === next.showIndex
+  && previous.tone === next.tone
+  && previous.strokes.length === next.strokes.length
+  && previous.strokes.every((stroke, index) => stroke === next.strokes[index])
+));
 
 function daySeed() {
   const now = new Date();
@@ -461,6 +486,16 @@ function normalizeEntry(entry: StoredJournalEntry | undefined): JournalEntry {
     currentId: typeof entry?.currentId === "string" ? entry.currentId : createJournalId(),
     pages: Array.isArray(entry?.pages) ? entry.pages : [],
   };
+}
+
+function loadEntry(entryKey: string) {
+  try {
+    const scoped = window.localStorage.getItem(`${storageKey}:${entryKey}`);
+    if (scoped) return normalizeEntry(JSON.parse(scoped) as StoredJournalEntry);
+  } catch {
+    // Fall through to the legacy notebook collection.
+  }
+  return normalizeEntry(loadDrafts()[entryKey]);
 }
 
 function nextDeskOrder(pages: ArchivedPage[]) {
@@ -576,11 +611,11 @@ function createDeskSound() {
   const regularKeys: SoundName[] = ["key-1", "key-2", "key-3", "key-4"];
   const outputGain = 0.3;
   let context: AudioContext | null = null;
-  let warmPromise: Promise<void> | null = null;
   let lastStrikeAt = 0;
   let smoothedInterval = 0;
   let dynamics: SoundShape = { gain: 1, rate: 1 };
   const samples = new Map<string, AudioBuffer>();
+  const pendingSamples = new Map<SoundName, Promise<void>>();
   const heldKeys = new Map<string, number>();
   let markerMotionFadeTimer = 0;
   let markerContactRequested = false;
@@ -592,15 +627,20 @@ function createDeskSound() {
     return context;
   };
 
-  const warm = () => {
-    if (warmPromise) return warmPromise;
+  const loadSample = (name: SoundName) => {
+    const existing = pendingSamples.get(name);
+    if (existing) return existing;
     const audio = ensureContext();
-    warmPromise = Promise.all(Object.values(files).map(async (path) => {
+    const path = files[name];
+    const pending = (async () => {
       const response = await fetch(path);
       if (!response.ok) throw new Error(`Unable to load journal sound: ${path}`);
       samples.set(path, await audio.decodeAudioData(await response.arrayBuffer()));
-    })).then(() => undefined).catch(() => undefined);
-    return warmPromise;
+    })().catch(() => {
+      pendingSamples.delete(name);
+    });
+    pendingSamples.set(name, pending);
+    return pending;
   };
 
   const stopMarkerContact = (release = 0.13) => {
@@ -649,7 +689,7 @@ function createDeskSound() {
     };
 
     if (samples.has(files["highlighter-draw"])) startNow();
-    else void warm().then(startNow);
+    else void loadSample("highlighter-draw").then(startNow);
   };
 
   const shapeMarkerMotion = (motion: HighlighterMotion) => {
@@ -699,7 +739,7 @@ function createDeskSound() {
         return;
       }
 
-      void warm().then(() => {
+      void loadSample(name).then(() => {
         if (samples.has(path)) playNow();
       });
     };
@@ -765,7 +805,6 @@ function createDeskSound() {
     markerOpen() {
       play("highlighter-open", 0.9, 0.985 + Math.random() * 0.025);
     },
-    warm,
     press(event: KeyboardEvent) {
       if (event.repeat) return;
       const isAudibleKey = event.key.length === 1
@@ -823,6 +862,7 @@ export function NotebookCoverArtwork({ children, inside = false, material, title
     <div
       className="journal-prompt__notebook-cover-art"
       data-inside={inside}
+      data-material={material}
       style={{ "--notebook-cover-color": palette.color, "--notebook-cover-edge": palette.edge, "--notebook-cover-ink": palette.ink } as React.CSSProperties}
     >
       <strong>{children ?? title}</strong>
@@ -899,6 +939,7 @@ async function downloadNotebookPdf({
 }) {
   if (!pages.length) return false;
   await document.fonts.ready;
+  const { PDFDocument } = await import("pdf-lib");
   const documentCopy = await PDFDocument.create();
   const canvas = document.createElement("canvas");
   canvas.width = PDF_WIDTH;
@@ -988,12 +1029,20 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   const prompt = promptText ?? prompts[promptIndex];
   const entryKey = journalKey ?? prompt;
   const notebookPaletteEntry = notebookPalette[notebookMaterial];
-  const [drafts, setDrafts] = useState<JournalDrafts>(loadDrafts);
-  const [initialEntry] = useState(() => normalizeEntry(drafts[entryKey]));
+  const [initialEntry] = useState(() => loadEntry(entryKey));
   const [answer, setAnswer] = useState(initialEntry.current);
   const [livePageId, setLivePageId] = useState(initialEntry.currentId);
   const [pages, setPages] = useState(initialEntry.pages);
   const [highlightStrokes, setHighlightStrokes] = useState<HighlightStroke[]>([]);
+  const highlightStrokesByPage = useMemo(() => {
+    const grouped = new Map<string, HighlightStroke[]>();
+    highlightStrokes.forEach((stroke) => {
+      const pageStrokes = grouped.get(stroke.pageId);
+      if (pageStrokes) pageStrokes.push(stroke);
+      else grouped.set(stroke.pageId, [stroke]);
+    });
+    return grouped;
+  }, [highlightStrokes]);
   const [highlighterActive, setHighlighterActive] = useState(false);
   const [eraserActive, setEraserActive] = useState(false);
   const [highlighterVisible, setHighlighterVisible] = useState(() => {
@@ -1041,6 +1090,10 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     window.addEventListener("pointerdown", closeToolMenu);
     return () => window.removeEventListener("pointerdown", closeToolMenu);
   }, [toolMenuOpen]);
+
+  useEffect(() => {
+    if (exportPreviewOpen) void import("pdf-lib");
+  }, [exportPreviewOpen]);
 
   useEffect(() => () => {
     if (markerVisibilityTimerRef.current !== null) {
@@ -1626,15 +1679,13 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
 
   useEffect(() => {
     const snapshot = { current: answer, currentId: livePageId, pages };
-    const nextDrafts = { ...drafts, [entryKey]: snapshot };
     const timer = window.setTimeout(() => {
       try {
-        window.localStorage.setItem(storageKey, JSON.stringify(nextDrafts));
-        setDrafts(nextDrafts);
-        onJournalChange?.(snapshot);
+        window.localStorage.setItem(`${storageKey}:${entryKey}`, JSON.stringify(snapshot));
       } catch {
         // The writing experience remains usable when browser storage is unavailable.
       }
+      onJournalChange?.(snapshot);
     }, 280);
     return () => window.clearTimeout(timer);
   }, [answer, entryKey, livePageId, onJournalChange, pages]);
@@ -1647,8 +1698,8 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     }
   }, [deskTidy, entryKey]);
 
-  const meaningfulPages = pages.filter((page) => page.text.trim() || highlightStrokes.some((stroke) => stroke.pageId === page.id));
-  const livePageHasInk = highlightStrokes.some((stroke) => stroke.pageId === livePageId);
+  const meaningfulPages = pages.filter((page) => page.text.trim() || Boolean(highlightStrokesByPage.get(page.id)?.length));
+  const livePageHasInk = Boolean(highlightStrokesByPage.get(livePageId)?.length);
   const exportSheets: ArchivedPage[] = [
     ...meaningfulPages,
     ...(answer.trim() || livePageHasInk ? [{ id: livePageId, slot: meaningfulPages.length % pagePlacements.length, text: answer.trimEnd() }] : []),
@@ -1689,7 +1740,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
 
   const discardArchivedPageIfBlank = (id: string | null) => {
     if (!id) return;
-    const hasInk = highlightStrokes.some((stroke) => stroke.pageId === id);
+    const hasInk = Boolean(highlightStrokesByPage.get(id)?.length);
     setPages((current) => current.filter((page) => page.id !== id || page.text.trim() || hasInk));
   };
 
@@ -1790,7 +1841,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     const index = pages.findIndex((page) => page.id === activeArchivedId);
     if (index < 0) return;
     editedPageRef.current = null;
-    const pageStrokes = highlightStrokes.filter((stroke) => stroke.pageId === activeArchivedId);
+    const pageStrokes = highlightStrokesByPage.get(activeArchivedId) ?? [];
     setDeletedPage({ index, page: pages[index], strokes: pageStrokes });
     setHighlightStrokes((current) => current.filter((stroke) => stroke.pageId !== activeArchivedId));
     void removePageHighlights(activeArchivedId);
@@ -1899,7 +1950,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
         reducedMotion={reducedMotion}
         surface={deskSurface}
       />
-      <JournalDappledLight reducedMotion={reducedMotion} />
+      <DeferredJournalDappledLight reducedMotion={reducedMotion} />
 
       {exportPreviewOpen && exportSheets.length ? (
         <section className="journal-prompt__export-viewer" aria-label="Field notes preview" role="dialog" aria-modal="true">
@@ -1909,7 +1960,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
             </article>
             {exportSheets.map((page, index) => (
               <article className="journal-prompt__export-paper" key={page.id}>
-                <InkedPagePreview densityCap={2} page={page} pageNumber={index + 2} strokes={highlightStrokes} tone="fresh" />
+                <InkedPagePreview densityCap={2} page={page} pageNumber={index + 2} strokes={highlightStrokesByPage.get(page.id) ?? []} tone="fresh" />
               </article>
             ))}
           </div>
@@ -1964,7 +2015,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                   <div className="journal-prompt__keepsake-face journal-prompt__keepsake-face--front">
                     {leaf.kind === "cover" ? (
                       <div className="journal-prompt__keepsake-cover-face journal-prompt__keepsake-cover-face--outside"><NotebookCoverArtwork material={notebookMaterial} title={folderTitle ?? "Field notes"} /></div>
-                    ) : leaf.front ? <InkedPagePreview densityCap={2} page={leaf.front} pageNumber={(index - 1) * 2 + 1} strokes={highlightStrokes} tone="fresh" /> : null}
+                    ) : leaf.front ? <InkedPagePreview densityCap={2} page={leaf.front} pageNumber={(index - 1) * 2 + 1} strokes={highlightStrokesByPage.get(leaf.front.id) ?? []} tone="fresh" /> : null}
                   </div>
                   <div className="journal-prompt__keepsake-face journal-prompt__keepsake-face--back">
                     {leaf.kind === "cover" ? (
@@ -1972,7 +2023,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                         <NotebookCoverArtwork inside material={notebookMaterial} title={folderTitle ?? "Field notes"} />
                         <i className="journal-prompt__keepsake-endpaper" aria-hidden="true" />
                       </div>
-                    ) : leaf.back ? <InkedPagePreview densityCap={2} page={leaf.back} pageNumber={(index - 1) * 2 + 2} strokes={highlightStrokes} tone="fresh" /> : null}
+                    ) : leaf.back ? <InkedPagePreview densityCap={2} page={leaf.back} pageNumber={(index - 1) * 2 + 2} strokes={highlightStrokesByPage.get(leaf.back.id) ?? []} tone="fresh" /> : null}
                   </div>
                 </div>
               )})}
@@ -2136,7 +2187,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
               <i aria-hidden="true" className="journal-prompt__archived-shadow" />
               {!isReturnTarget ? (
                 <>
-                  <InkedPagePreview page={page} pageNumber={pageIndex + 1} showIndex={false} strokes={highlightStrokes} />
+                  <InkedPagePreview page={page} pageNumber={pageIndex + 1} showIndex={false} strokes={highlightStrokesByPage.get(page.id) ?? []} />
                   <span aria-hidden="true" className="journal-prompt__archived-page-index">
                     {String(pageIndex + 1).padStart(2, "0")}
                   </span>
@@ -2241,9 +2292,9 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 data-picked-up="true"
               >
                 {returningPaperId === activeArchivedPage.id ? (
-                  <InkedPagePreview page={activeArchivedPage} pageNumber={activePageNumber} strokes={highlightStrokes} />
+                  <InkedPagePreview page={activeArchivedPage} pageNumber={activePageNumber} strokes={highlightStrokesByPage.get(activeArchivedPage.id) ?? []} />
                 ) : null}
-                {activeArchivedPage.text.trim() || highlightStrokes.some((stroke) => stroke.pageId === activeArchivedPage.id) ? <span className="journal-prompt__sheet-index" aria-hidden="true">{String(activePageNumber).padStart(2, "0")}</span> : null}
+                {activeArchivedPage.text.trim() || highlightStrokesByPage.get(activeArchivedPage.id)?.length ? <span className="journal-prompt__sheet-index" aria-hidden="true">{String(activePageNumber).padStart(2, "0")}</span> : null}
                 <div className="journal-prompt__writing-field">
                   <textarea
                     aria-label={`Edit page ${activePageNumber}`}
@@ -2333,7 +2384,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
               aria-pressed={eraserActive}
               data-help={eraserActive ? "Stop erasing" : "Erase"}
               data-tool="eraser"
-              disabled={!eraserActive && !highlightStrokes.some((stroke) => stroke.pageId === (activeArchivedId ?? livePageId))}
+              disabled={!eraserActive && !highlightStrokesByPage.get(activeArchivedId ?? livePageId)?.length}
               onClick={() => {
                 const nextActive = !eraserActive;
                 if (nextActive && highlighterActive) soundRef.current?.markerClose();
@@ -2385,7 +2436,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
               densityCap={2}
               page={releasingPage}
               pageNumber={releasingPageIndex + 1}
-              strokes={highlightStrokes}
+              strokes={highlightStrokesByPage.get(releasingPage.id) ?? []}
             />
           </div>
         </div>

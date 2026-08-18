@@ -8,11 +8,14 @@ import {
   WarningCircleIcon,
 } from "@phosphor-icons/react";
 import type { Session } from "@supabase/supabase-js";
-import { JournalDappledLight } from "./components/JournalDappledLight";
-import { countMeaningfulJournalPages, downloadJournalSnapshot, JournalPrompt, NotebookCoverArtwork } from "./components/JournalPrompt";
+import { DeferredJournalDappledLight } from "./components/DeferredJournalDappledLight";
+import { downloadJournalSnapshot, JournalPrompt, NotebookCoverArtwork } from "./components/JournalPrompt";
+import { loadHighlightStrokes, removeHighlightStrokes } from "./components/journalInk";
 import { useReducedMotion } from "./hooks/useReducedMotion";
 import {
   ensureLocalLibrary,
+  createFolder,
+  deleteFolder,
   getJournalSnapshot,
   type FieldFolder,
   type FieldFolderSummary,
@@ -21,10 +24,9 @@ import {
   LOCAL_OWNER_ID,
   notebookPalette,
   renameFolder,
-  rolloverNotebook,
   saveJournalSnapshot,
 } from "./lib/fieldNotesDb";
-import { signInWithGoogle, supabase, supabaseConfigured } from "./lib/supabase";
+import { getSupabaseClient, signInWithGoogle, supabaseConfigured } from "./lib/supabase";
 
 type ProductMode = "threshold" | "naming" | "editor";
 
@@ -32,6 +34,7 @@ type ProductMode = "threshold" | "naming" | "editor";
 // is being shaped. Keeping this flag makes the Google/Supabase threshold easy
 // to restore later without putting it in front of the notebook today.
 const LOCAL_ONLY_EDITION = true;
+const MAX_LOCAL_NOTEBOOKS = 2;
 
 // The product currently opens one primary notebook directly. The collection
 // implementation stays intact below so multiple notebooks can be restored by
@@ -117,7 +120,7 @@ function FolderDesk({ accountLabel, folders, onCreate, onOpen, onSignOut }: Fold
 
 function ProductLight() {
   const reducedMotion = useReducedMotion();
-  return <JournalDappledLight reducedMotion={reducedMotion} />;
+  return <DeferredJournalDappledLight reducedMotion={reducedMotion} />;
 }
 
 function ProductThreshold({ onPreview }: { onPreview: () => void }) {
@@ -168,17 +171,26 @@ function ProductThreshold({ onPreview }: { onPreview: () => void }) {
 }
 
 type NameNotebookProps = {
+  activeId: string;
+  arriveFromShuffle: boolean;
+  folders: FieldFolderSummary[];
   initialTitle: string;
   material: FieldFolder["material"];
   onContinue: (title: string) => void | Promise<void>;
   onFreshNotebook: () => void;
+  onSelectNotebook: (folder: FieldFolderSummary) => void;
   showFreshNotebook: boolean;
 };
 
-function NameNotebook({ initialTitle, material, onContinue, onFreshNotebook, showFreshNotebook }: NameNotebookProps) {
+function NameNotebook({ activeId, arriveFromShuffle, folders, initialTitle, material, onContinue, onFreshNotebook, onSelectNotebook, showFreshNotebook }: NameNotebookProps) {
   const [title, setTitle] = useState(initialTitle === "Field notes" ? "" : initialTitle);
+  const [enteredByShuffle] = useState(arriveFromShuffle);
+  const [shuffleTargetId, setShuffleTargetId] = useState<string | null>(null);
   const [slipDragging, setSlipDragging] = useState(false);
   const sceneRef = useRef<HTMLElement>(null);
+  const notebookShadowFrameRef = useRef(0);
+  const notebookShadowPointerRef = useRef({ x: window.innerWidth * .5, y: window.innerHeight * .5 });
+  const reducedMotionQueryRef = useRef<MediaQueryList | null>(null);
   const slipRef = useRef<HTMLElement>(null);
   const slipOffsetRef = useRef({ x: 0, y: 0 });
   const slipDragRef = useRef<{
@@ -240,19 +252,31 @@ function NameNotebook({ initialTitle, material, onContinue, onFreshNotebook, sho
     setSlipDragging(false);
   };
 
+  useEffect(() => () => {
+    window.cancelAnimationFrame(notebookShadowFrameRef.current);
+  }, []);
+
   const updateNotebookShadow = (event: ReactPointerEvent<HTMLElement>) => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const horizontal = event.clientX / window.innerWidth - .5;
-    const vertical = event.clientY / window.innerHeight - .5;
-    const shadowX = horizontal * -34;
-    const shadowY = 26 + vertical * -20;
-    sceneRef.current?.style.setProperty("--notebook-shadow-x", `${shadowX.toFixed(1)}px`);
-    sceneRef.current?.style.setProperty("--notebook-shadow-y", `${shadowY.toFixed(1)}px`);
-    sceneRef.current?.style.setProperty("--notebook-contact-x", `${(shadowX * .22).toFixed(1)}px`);
-    sceneRef.current?.style.setProperty("--notebook-contact-y", `${Math.max(5, shadowY * .2).toFixed(1)}px`);
+    reducedMotionQueryRef.current ??= window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (reducedMotionQueryRef.current.matches) return;
+    notebookShadowPointerRef.current = { x: event.clientX, y: event.clientY };
+    if (notebookShadowFrameRef.current) return;
+    notebookShadowFrameRef.current = window.requestAnimationFrame(() => {
+      notebookShadowFrameRef.current = 0;
+      const horizontal = notebookShadowPointerRef.current.x / window.innerWidth - .5;
+      const vertical = notebookShadowPointerRef.current.y / window.innerHeight - .5;
+      const shadowX = horizontal * -34;
+      const shadowY = 26 + vertical * -20;
+      sceneRef.current?.style.setProperty("--notebook-shadow-x", `${shadowX.toFixed(1)}px`);
+      sceneRef.current?.style.setProperty("--notebook-shadow-y", `${shadowY.toFixed(1)}px`);
+      sceneRef.current?.style.setProperty("--notebook-contact-x", `${(shadowX * .22).toFixed(1)}px`);
+      sceneRef.current?.style.setProperty("--notebook-contact-y", `${Math.max(5, shadowY * .2).toFixed(1)}px`);
+    });
   };
 
   const resetNotebookShadow = () => {
+    window.cancelAnimationFrame(notebookShadowFrameRef.current);
+    notebookShadowFrameRef.current = 0;
     sceneRef.current?.style.removeProperty("--notebook-shadow-x");
     sceneRef.current?.style.removeProperty("--notebook-shadow-y");
     sceneRef.current?.style.removeProperty("--notebook-contact-x");
@@ -263,12 +287,30 @@ function NameNotebook({ initialTitle, material, onContinue, onFreshNotebook, sho
     <main className="product-threshold product-notebook-name" data-desk-surface="archive-signal" onPointerLeave={resetNotebookShadow} onPointerMove={updateNotebookShadow} ref={sceneRef}>
       <ProductLight />
       <section className="product-notebook-name__onboarding" aria-labelledby="notebook-name-title">
-        <form className="product-notebook-name__form" onSubmit={(event) => {
+        <form className="product-notebook-name__form" data-shuffling={Boolean(shuffleTargetId)} onSubmit={(event) => {
           event.preventDefault();
           const nextTitle = title.trim();
           if (nextTitle) void onContinue(nextTitle);
         }}>
-          <div className="product-notebook-name__cover journal-prompt__export-paper journal-prompt__export-paper--cover">
+          <div className="product-notebook-name__stack" data-count={folders.length}>
+            {folders.filter((folder) => folder.id !== activeId).map((folder) => (
+              <button
+                aria-label={`Open ${folder.title}`}
+                className="product-notebook-name__stack-back journal-prompt__export-paper journal-prompt__export-paper--cover"
+                data-shuffling={shuffleTargetId === folder.id}
+                key={folder.id}
+                onClick={() => {
+                  if (shuffleTargetId) return;
+                  setShuffleTargetId(folder.id);
+                  window.setTimeout(() => onSelectNotebook(folder), 390);
+                }}
+                type="button"
+              >
+                <NotebookCoverArtwork material={folder.material} title={folder.title} />
+              </button>
+            ))}
+          </div>
+          <div className="product-notebook-name__cover journal-prompt__export-paper journal-prompt__export-paper--cover" data-arrived-by-shuffle={enteredByShuffle} data-shuffling={Boolean(shuffleTargetId)}>
               <aside
                 className="product-notebook-name__instruction-slip"
                 data-dragging={slipDragging}
@@ -311,7 +353,7 @@ function NameNotebook({ initialTitle, material, onContinue, onFreshNotebook, sho
             </NotebookCoverArtwork>
           </div>
           <div className="product-notebook-name__actions">
-            {showFreshNotebook ? <button className="product-notebook-name__cta product-notebook-name__cta--fresh" onClick={onFreshNotebook} type="button">New notebook</button> : null}
+            {showFreshNotebook ? <button className="product-notebook-name__cta product-notebook-name__cta--fresh" onClick={onFreshNotebook} type="button"><PlusIcon aria-hidden="true" size={15} /> Add notebook</button> : null}
             <button className="product-notebook-name__cta" disabled={!title.trim()} type="submit">{showFreshNotebook ? "Continue" : "Start writing"}</button>
           </div>
         </form>
@@ -322,14 +364,15 @@ function NameNotebook({ initialTitle, material, onContinue, onFreshNotebook, sho
 
 type FreshNotebookDialogProps = {
   busy: boolean;
-  downloaded: boolean;
+  downloadedId: string | null;
+  folders: FieldFolderSummary[];
   onClose: () => void;
-  onCreate: () => void;
-  onDownload: () => void;
-  pageCount: number | null;
+  onCreate: (folderId: string) => void;
+  onDownload: (folderId: string) => void;
 };
 
-function FreshNotebookDialog({ busy, downloaded, onClose, onCreate, onDownload, pageCount }: FreshNotebookDialogProps) {
+function FreshNotebookDialog({ busy, downloadedId, folders, onClose, onCreate, onDownload }: FreshNotebookDialogProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !busy) onClose();
@@ -338,7 +381,7 @@ function FreshNotebookDialog({ busy, downloaded, onClose, onCreate, onDownload, 
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [busy, onClose]);
 
-  const hasPages = pageCount !== null && pageCount > 0;
+  const selected = folders.find((folder) => folder.id === selectedId) ?? null;
   return (
     <section
       aria-labelledby="fresh-notebook-title"
@@ -350,22 +393,34 @@ function FreshNotebookDialog({ busy, downloaded, onClose, onCreate, onDownload, 
       role="dialog"
     >
       <div className="product-fresh-notebook__sheet">
-        <h2 id="fresh-notebook-title">New notebook?</h2>
-        {pageCount === null ? (
-          <p>Checking what is already on this desk…</p>
-        ) : (
-          <ul className="product-fresh-notebook__facts">
-            <li><WarningCircleIcon aria-hidden="true" size={17} /><span>Replaces the notebook on this desk</span></li>
-            <li><CloudSlashIcon aria-hidden="true" size={17} /><span>No cloud backup</span></li>
-            <li><i aria-hidden="true" className="product-fresh-notebook__cover-swatch" /><span>Download the current notebook to keep it</span></li>
-          </ul>
-        )}
-        {pageCount !== null ? (
-          <div className="product-fresh-notebook__actions">
-            {hasPages ? <button disabled={busy || downloaded} onClick={onDownload} type="button">{downloaded ? "Downloaded" : "Download current"}</button> : null}
-            <button className="product-fresh-notebook__create" disabled={busy} onClick={onCreate} type="button">{busy ? "Preparing…" : "Create new notebook"}</button>
-          </div>
-        ) : null}
+        <h2 id="fresh-notebook-title">Make room for one more</h2>
+        <p>This desk keeps two notebooks in this browser. Choose one to remove before making a new notebook.</p>
+        <div className="product-fresh-notebook__choices" role="radiogroup" aria-label="Notebook to remove">
+          {folders.map((folder) => (
+            <button
+              aria-checked={selectedId === folder.id}
+              className="product-fresh-notebook__choice"
+              data-material={folder.material}
+              data-selected={selectedId === folder.id}
+              key={folder.id}
+              onClick={() => setSelectedId(folder.id)}
+              role="radio"
+              style={{ "--choice-color": notebookPalette[folder.material].color, "--choice-edge": notebookPalette[folder.material].edge } as CSSProperties}
+              type="button"
+            >
+              <i aria-hidden="true" />
+              <span><strong>{folder.title}</strong><small>{folder.pageCount} {folder.pageCount === 1 ? "page" : "pages"}</small></span>
+            </button>
+          ))}
+        </div>
+        <ul className="product-fresh-notebook__facts">
+          <li><WarningCircleIcon aria-hidden="true" size={17} /><span>The selected notebook and its highlighter marks will be deleted from this browser.</span></li>
+          <li><CloudSlashIcon aria-hidden="true" size={17} /><span>There is no cloud backup yet.</span></li>
+        </ul>
+        <div className="product-fresh-notebook__actions">
+          {selected && selected.pageCount > 0 ? <button disabled={busy || downloadedId === selected.id} onClick={() => onDownload(selected.id)} type="button">{downloadedId === selected.id ? "Downloaded" : "Download selected"}</button> : null}
+          <button className="product-fresh-notebook__create" disabled={busy || !selectedId} onClick={() => selectedId && onCreate(selectedId)} type="button">{busy ? "Preparing…" : "Delete & create new"}</button>
+        </div>
       </div>
     </section>
   );
@@ -377,19 +432,21 @@ export default function App() {
   const [previewing, setPreviewing] = useState(() => window.sessionStorage.getItem("field-notes:local-preview") === "true");
   const [mode, setMode] = useState<ProductMode>("threshold");
   const [activeFolder, setActiveFolder] = useState<FieldFolder | null>(null);
+  const [folders, setFolders] = useState<FieldFolderSummary[]>([]);
   const [freshDialogOpen, setFreshDialogOpen] = useState(false);
-  const [freshPageCount, setFreshPageCount] = useState<number | null>(null);
-  const [freshSnapshot, setFreshSnapshot] = useState<JournalSnapshot | null>(null);
   const [freshBusy, setFreshBusy] = useState(false);
-  const [freshDownloaded, setFreshDownloaded] = useState(false);
+  const [freshDownloadedId, setFreshDownloadedId] = useState<string | null>(null);
   const [returnedFromEditor, setReturnedFromEditor] = useState(false);
+  const [arriveFromShuffle, setArriveFromShuffle] = useState(false);
 
   const hasAccess = LOCAL_ONLY_EDITION || previewing || Boolean(session);
   const ownerId = session?.user.id ?? LOCAL_OWNER_ID;
   const openPrimaryNotebook = useCallback(async () => {
     await ensureLocalLibrary(ownerId);
-    const [primaryNotebook] = await listFolders(ownerId);
+    const localFolders = await listFolders(ownerId);
+    const [primaryNotebook] = localFolders;
     if (!primaryNotebook) return;
+    setFolders(localFolders);
     setActiveFolder(primaryNotebook);
     const isFreshNotebook = primaryNotebook.title === "Field notes"
       && primaryNotebook.pagePreviews.every((page) => !page.text);
@@ -400,19 +457,23 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    if (!supabase) {
+    let unsubscribe: (() => void) | undefined;
+    if (LOCAL_ONLY_EDITION || !supabaseConfigured) {
       setBooting(false);
       return;
     }
-    supabase.auth.getSession().then(({ data }) => {
+    void getSupabaseClient().then(async (supabase) => {
+      if (!mounted || !supabase) return;
+      const { data } = await supabase.auth.getSession();
       if (!mounted) return;
       setSession(data.session);
       setBooting(false);
+      const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
+      unsubscribe = () => subscription.subscription.unsubscribe();
     });
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
     return () => {
       mounted = false;
-      subscription.subscription.unsubscribe();
+      unsubscribe?.();
     };
   }, []);
 
@@ -433,19 +494,23 @@ export default function App() {
     window.sessionStorage.removeItem("field-notes:local-preview");
     setPreviewing(false);
     setActiveFolder(null);
-    if (supabase && session) await supabase.auth.signOut();
+    setFolders([]);
+    if (session) {
+      const supabase = await getSupabaseClient();
+      await supabase?.auth.signOut();
+    }
     setMode("threshold");
   };
 
   const nameNotebook = async (title: string) => {
     if (!activeFolder) return;
     await renameFolder(activeFolder.id, title);
-    const [updated] = await listFolders(ownerId);
+    const updatedFolders = await listFolders(ownerId);
+    const updated = updatedFolders.find((folder) => folder.id === activeFolder.id);
     if (!updated) return;
+    setFolders(updatedFolders);
     setActiveFolder(updated);
     setFreshDialogOpen(false);
-    setFreshPageCount(null);
-    setFreshSnapshot(null);
     setReturnedFromEditor(false);
     setMode("editor");
   };
@@ -460,51 +525,79 @@ export default function App() {
     setFreshDialogOpen(false);
   }, [freshBusy]);
 
-  const openFreshDialog = useCallback(async () => {
+  const materialForNewNotebook = useCallback((currentFolders: FieldFolderSummary[]) => (
+    currentFolders.some((folder) => folder.material === "kraft") ? "charcoal" : "kraft"
+  ), []);
+
+  const addNotebook = useCallback(async () => {
     if (!activeFolder) return;
-    setFreshDialogOpen(true);
-    setFreshPageCount(null);
-    setFreshSnapshot(null);
-    setFreshDownloaded(false);
-    const snapshot = await getJournalSnapshot(activeFolder.id);
-    if (!snapshot) {
-      setFreshPageCount(0);
+    if (folders.length < MAX_LOCAL_NOTEBOOKS) {
+      setFreshBusy(true);
+      try {
+        const nextFolder = await createFolder("Field notes", ownerId, materialForNewNotebook(folders));
+        const updatedFolders = await listFolders(ownerId);
+        setFolders(updatedFolders);
+        setActiveFolder(nextFolder);
+        setReturnedFromEditor(false);
+        setMode("naming");
+      } finally {
+        setFreshBusy(false);
+      }
       return;
     }
-    setFreshSnapshot(snapshot);
-    setFreshPageCount(await countMeaningfulJournalPages(snapshot));
-  }, [activeFolder]);
+    setFreshDialogOpen(true);
+    setFreshDownloadedId(null);
+  }, [activeFolder, folders, materialForNewNotebook, ownerId]);
 
-  const downloadCurrentNotebook = useCallback(async () => {
-    if (!activeFolder || !freshSnapshot || freshBusy) return;
+  const downloadNotebook = useCallback(async (folderId: string) => {
+    const folder = folders.find((candidate) => candidate.id === folderId);
+    if (!folder || freshBusy) return;
     setFreshBusy(true);
     try {
+      const snapshot = await getJournalSnapshot(folder.id);
+      if (!snapshot) return;
       const downloaded = await downloadJournalSnapshot({
-        folderTitle: activeFolder.title,
-        snapshot: freshSnapshot,
+        folderTitle: folder.title,
+        snapshot,
       });
-      setFreshDownloaded(downloaded);
+      if (downloaded) setFreshDownloadedId(folder.id);
     } finally {
       setFreshBusy(false);
     }
-  }, [activeFolder, freshBusy, freshSnapshot]);
+  }, [folders, freshBusy]);
 
-  const createFreshNotebook = useCallback(async () => {
-    if (!activeFolder || freshBusy) return;
+  const replaceNotebook = useCallback(async (folderId: string) => {
+    if (freshBusy) return;
+    const folderToDelete = folders.find((folder) => folder.id === folderId);
+    if (!folderToDelete) return;
     setFreshBusy(true);
     try {
-      const nextFolder = await rolloverNotebook(activeFolder);
+      const snapshot = await getJournalSnapshot(folderId);
+      const pageIds = new Set(snapshot ? [snapshot.currentId, ...snapshot.pages.map((page) => page.id)] : []);
+      const strokes = pageIds.size > 0 ? await loadHighlightStrokes() : [];
+      await deleteFolder(folderId);
+      await removeHighlightStrokes(strokes.filter((stroke) => pageIds.has(stroke.pageId)).map((stroke) => stroke.id));
+      const remaining = folders.filter((folder) => folder.id !== folderId);
+      const nextFolder = await createFolder("Field notes", ownerId, materialForNewNotebook(remaining));
+      const updatedFolders = await listFolders(ownerId);
+      setFolders(updatedFolders);
       setActiveFolder(nextFolder);
       setFreshDialogOpen(false);
-      setFreshPageCount(null);
-      setFreshSnapshot(null);
-      setFreshDownloaded(false);
+      setFreshDownloadedId(null);
       setReturnedFromEditor(false);
       setMode("naming");
     } finally {
       setFreshBusy(false);
     }
-  }, [activeFolder, freshBusy]);
+  }, [folders, freshBusy, materialForNewNotebook, ownerId]);
+
+  const selectNotebook = useCallback((folder: FieldFolderSummary) => {
+    setArriveFromShuffle(true);
+    setActiveFolder(folder);
+    setReturnedFromEditor(true);
+    setFreshDialogOpen(false);
+    window.setTimeout(() => setArriveFromShuffle(false), 0);
+  }, []);
 
   if (booting) return <main className="product-boot"><span>FIELD NOTES</span></main>;
   if (!hasAccess) return <ProductThreshold onPreview={enterPreview} />;
@@ -512,15 +605,15 @@ export default function App() {
   if (mode === "naming" && activeFolder) {
     return (
       <>
-        <NameNotebook initialTitle={activeFolder.title} key={activeFolder.id} material={activeFolder.material} onContinue={nameNotebook} onFreshNotebook={() => void openFreshDialog()} showFreshNotebook={returnedFromEditor} />
+        <NameNotebook activeId={activeFolder.id} arriveFromShuffle={arriveFromShuffle} folders={folders} initialTitle={activeFolder.title} key={activeFolder.id} material={activeFolder.material} onContinue={nameNotebook} onFreshNotebook={() => void addNotebook()} onSelectNotebook={selectNotebook} showFreshNotebook={returnedFromEditor} />
         {returnedFromEditor && freshDialogOpen ? (
           <FreshNotebookDialog
             busy={freshBusy}
-            downloaded={freshDownloaded}
+            downloadedId={freshDownloadedId}
+            folders={folders}
             onClose={closeFreshDialog}
-            onCreate={() => void createFreshNotebook()}
-            onDownload={() => void downloadCurrentNotebook()}
-            pageCount={freshPageCount}
+            onCreate={(folderId) => void replaceNotebook(folderId)}
+            onDownload={(folderId) => void downloadNotebook(folderId)}
           />
         ) : null}
       </>
@@ -535,8 +628,6 @@ export default function App() {
         notebookMaterial={activeFolder.material}
         onHome={() => {
           setFreshDialogOpen(false);
-          setFreshPageCount(null);
-          setFreshSnapshot(null);
           setReturnedFromEditor(true);
           setMode("naming");
         }}

@@ -103,7 +103,11 @@ export function JournalDappledLight({ reducedMotion }: JournalDappledLightProps)
     sunlight.position.set(-2.4, 4.2, 18);
     sunlight.target.position.set(0, 0, 0);
     sunlight.castShadow = true;
-    sunlight.shadow.mapSize.set(4096, 4096);
+    const memoryAwareNavigator = navigator as Navigator & { deviceMemory?: number };
+    const constrainedDevice = window.matchMedia("(max-width: 760px)").matches
+      || (memoryAwareNavigator.deviceMemory ?? 8) <= 4;
+    const shadowMapSize = constrainedDevice ? 1024 : 2048;
+    sunlight.shadow.mapSize.set(shadowMapSize, shadowMapSize);
     sunlight.shadow.camera.left = -16;
     sunlight.shadow.camera.right = 16;
     sunlight.shadow.camera.top = 14;
@@ -112,7 +116,10 @@ export function JournalDappledLight({ reducedMotion }: JournalDappledLightProps)
     sunlight.shadow.camera.far = 44;
     sunlight.shadow.bias = -0.00035;
     sunlight.shadow.normalBias = 0.018;
-    sunlight.shadow.radius = 26;
+    // PCF radius is measured in shadow-map texels. Scale it with map size so
+    // the lower allocation preserves the original physical softness instead
+    // of washing the canopy out.
+    sunlight.shadow.radius = constrainedDevice ? 6.5 : 13;
     scene.add(sunlight, sunlight.target);
 
     const leafTexture = makeLeafTexture();

@@ -1,0 +1,31 @@
+@font-face {
+  font-family: "Recursive Variable";
+  font-style: oblique 0deg 15deg;
+  font-display: swap;
+  font-weight: 300 1000;
+  src: url("@fontsource-variable/recursive/files/recursive-latin-full-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Geist Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Averia Serif Libre";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("@fontsource/averia-serif-libre/files/averia-serif-libre-latin-400-normal.woff2") format("woff2");
+}
