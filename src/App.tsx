@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { flushSync } from "react-dom";
 import {
+  CloudSlashIcon,
   PlusIcon,
   GoogleLogoIcon,
   SignOutIcon,
-  XIcon,
+  WarningCircleIcon,
 } from "@phosphor-icons/react";
 import type { Session } from "@supabase/supabase-js";
 import { JournalDappledLight } from "./components/JournalDappledLight";
@@ -311,7 +312,7 @@ function NameNotebook({ initialTitle, material, onContinue, onFreshNotebook, sho
           </div>
           <div className="product-notebook-name__actions">
             {showFreshNotebook ? <button className="product-notebook-name__cta product-notebook-name__cta--fresh" onClick={onFreshNotebook} type="button">New notebook</button> : null}
-            <button className="product-notebook-name__cta" disabled={!title.trim()} type="submit">Start writing</button>
+            <button className="product-notebook-name__cta" disabled={!title.trim()} type="submit">{showFreshNotebook ? "Continue" : "Start writing"}</button>
           </div>
         </form>
       </section>
@@ -339,17 +340,25 @@ function FreshNotebookDialog({ busy, downloaded, onClose, onCreate, onDownload, 
 
   const hasPages = pageCount !== null && pageCount > 0;
   return (
-    <section aria-labelledby="fresh-notebook-title" aria-modal="true" className="product-fresh-notebook" role="dialog">
+    <section
+      aria-labelledby="fresh-notebook-title"
+      aria-modal="true"
+      className="product-fresh-notebook"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+      role="dialog"
+    >
       <div className="product-fresh-notebook__sheet">
-        <button aria-label="Close new notebook prompt" className="product-fresh-notebook__close" disabled={busy} onClick={onClose} type="button"><XIcon aria-hidden="true" size={19} /></button>
-        <small>NEW NOTEBOOK / DESK RESET</small>
-        <h2 id="fresh-notebook-title">Start a fresh notebook?</h2>
+        <h2 id="fresh-notebook-title">New notebook?</h2>
         {pageCount === null ? (
           <p>Checking what is already on this desk…</p>
-        ) : hasPages ? (
-          <p>This notebook has {pageCount} {pageCount === 1 ? "page" : "pages"} worth keeping. Download a copy first, or make a fresh notebook now. The current notebook will stay archived on this device.</p>
         ) : (
-          <p>There are no written or highlighted pages to download. The current cover will be archived and replaced with a blank notebook.</p>
+          <ul className="product-fresh-notebook__facts">
+            <li><WarningCircleIcon aria-hidden="true" size={17} /><span>Replaces the notebook on this desk</span></li>
+            <li><CloudSlashIcon aria-hidden="true" size={17} /><span>No cloud backup</span></li>
+            <li><i aria-hidden="true" className="product-fresh-notebook__cover-swatch" /><span>Current notebook stays in this browser only<br /><small>Cannot be reopened here yet</small></span></li>
+          </ul>
         )}
         {pageCount !== null ? (
           <div className="product-fresh-notebook__actions">
@@ -469,7 +478,6 @@ export default function App() {
     try {
       const downloaded = await downloadJournalSnapshot({
         folderTitle: activeFolder.title,
-        notebookMaterial: activeFolder.material,
         snapshot: freshSnapshot,
       });
       setFreshDownloaded(downloaded);

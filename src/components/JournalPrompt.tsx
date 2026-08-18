@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ArchiveIcon, ArrowCounterClockwiseIcon, ArrowLeftIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, EraserIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
-import { BookCopyIcon } from "@hugeicons/core-free-icons";
+import { ArchiveIcon, ArrowCounterClockwiseIcon, ArrowUUpLeftIcon, CaretRightIcon, DownloadSimpleIcon, EraserIcon, HouseIcon, ListIcon, SquaresFourIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
+import { Notebook01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { PDFDocument } from "pdf-lib";
 import { useReducedMotion } from "../hooks/useReducedMotion";
@@ -864,65 +864,12 @@ export function PhysicalHighlighter({ active, className = "", initialEntry = fal
   );
 }
 
-let notebookCoverTexture: Promise<HTMLImageElement> | null = null;
-
-function loadNotebookCoverTexture() {
-  if (!notebookCoverTexture) {
-    notebookCoverTexture = new Promise((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error("Unable to load notebook cover texture."));
-      image.src = "/assets/textures/journal-cover-fiber-orange-v1.jpg";
-    });
-  }
-  return notebookCoverTexture;
-}
-
-async function drawNotebookCover(context: CanvasRenderingContext2D, title: string, material: FolderMaterial) {
-  const palette = notebookPalette[material];
-  const texture = await loadNotebookCoverTexture();
-  context.save();
-  context.fillStyle = palette.color;
-  context.fillRect(0, 0, PDF_WIDTH, PDF_HEIGHT);
-  context.drawImage(texture, 0, 0, PDF_WIDTH, PDF_HEIGHT);
-  const shade = context.createLinearGradient(0, 0, PDF_WIDTH, PDF_HEIGHT);
-  shade.addColorStop(0, "rgba(255, 255, 255, .11)");
-  shade.addColorStop(.35, "rgba(255, 255, 255, 0)");
-  shade.addColorStop(1, "rgba(32, 16, 11, .13)");
-  context.fillStyle = shade;
-  context.fillRect(0, 0, PDF_WIDTH, PDF_HEIGHT);
-  context.strokeStyle = "rgba(28, 19, 16, .34)";
-  context.lineWidth = 5;
-  context.strokeRect(76, 76, PDF_WIDTH - 152, PDF_HEIGHT - 152);
-  context.fillStyle = palette.ink;
-  context.font = "400 174px 'Averia Serif Libre', Georgia, serif";
-  (context as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = "0px";
-  const maxTitleWidth = PDF_WIDTH - 360;
-  const words = title.split(" ");
-  const titleLines: string[] = [];
-  let currentLine = "";
-  for (const word of words) {
-    const candidate = currentLine ? `${currentLine} ${word}` : word;
-    if (currentLine && context.measureText(candidate).width > maxTitleWidth) {
-      titleLines.push(currentLine);
-      currentLine = word;
-    } else currentLine = candidate;
-  }
-  if (currentLine) titleLines.push(currentLine);
-  const lineHeight = 178;
-  const firstBaseline = 300;
-  titleLines.forEach((line, index) => context.fillText(line, 180, firstBaseline + index * lineHeight));
-  context.restore();
-}
-
 async function downloadNotebookPdf({
   folderTitle,
-  notebookMaterial,
   pages,
   strokes,
 }: {
   folderTitle: string;
-  notebookMaterial: FolderMaterial;
   pages: ArchivedPage[];
   strokes: HighlightStroke[];
 }) {
@@ -934,18 +881,10 @@ async function downloadNotebookPdf({
   canvas.height = PDF_HEIGHT;
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) return false;
-  await drawNotebookCover(context, folderTitle, notebookMaterial);
-  const coverPng = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Unable to render the notebook cover.")), "image/png");
-  });
-  const coverBytes = new Uint8Array(await coverPng.arrayBuffer());
-  const coverImage = await documentCopy.embedPng(coverBytes);
-  const coverPage = documentCopy.addPage([595.28, 841.89]);
-  coverPage.drawImage(coverImage, { height: coverPage.getHeight(), width: coverPage.getWidth(), x: 0, y: 0 });
   for (const [index, page] of pages.entries()) {
     renderJournalPage(context, {
       page,
-      pageNumber: index + 2,
+      pageNumber: index + 1,
       strokes,
       tone: "fresh",
     });
@@ -958,10 +897,10 @@ async function downloadNotebookPdf({
     pdfPage.drawImage(image, { height: pdfPage.getHeight(), width: pdfPage.getWidth(), x: 0, y: 0 });
   }
   const safeTitle = folderTitle
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "field-notes";
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 80) || "Field notes";
   const pdfBytes = await documentCopy.save();
   const pdfBuffer = pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength) as ArrayBuffer;
   const fileUrl = URL.createObjectURL(new Blob([pdfBuffer], { type: "application/pdf" }));
@@ -980,11 +919,9 @@ async function downloadNotebookPdf({
 
 export async function downloadJournalSnapshot({
   folderTitle,
-  notebookMaterial,
   snapshot,
 }: {
   folderTitle: string;
-  notebookMaterial: FolderMaterial;
   snapshot: JournalSnapshot;
 }) {
   const allStrokes = await loadHighlightStrokes().catch(() => [] as HighlightStroke[]);
@@ -996,7 +933,7 @@ export async function downloadJournalSnapshot({
       ? [{ id: snapshot.currentId, slot: snapshot.pages.length % pagePlacements.length, text: snapshot.current.trimEnd() }]
       : []),
   ];
-  return downloadNotebookPdf({ folderTitle, notebookMaterial, pages, strokes });
+  return downloadNotebookPdf({ folderTitle, pages, strokes });
 }
 
 export async function countMeaningfulJournalPages(snapshot: JournalSnapshot) {
@@ -1016,11 +953,11 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   const pickupOriginRef = useRef<PaperPose | null>(null);
   const pageFieldRef = useRef<HTMLDivElement | null>(null);
   const pageDragRef = useRef<PageDrag | null>(null);
-  const draggedPageRef = useRef<string | null>(null);
   const editedPageRef = useRef<string | null>(null);
   const paperSwitchRef = useRef(0);
   const deskArrangeTimerRef = useRef<number | null>(null);
   const markerVisibilityTimerRef = useRef<number | null>(null);
+  const toolMenuRef = useRef<HTMLDivElement | null>(null);
   const soundRef = useRef<ReturnType<typeof createDeskSound> | null>(null);
   const reducedMotion = useReducedMotion();
   const [promptIndex] = useState(() => daySeed() % prompts.length);
@@ -1060,6 +997,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     }
   });
   const [deskArranging, setDeskArranging] = useState(false);
+  const [toolMenuOpen, setToolMenuOpen] = useState(false);
   const activeArchivedPage = activeArchivedId
     ? pages.find((page) => page.id === activeArchivedId) ?? null
     : null;
@@ -1069,6 +1007,15 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
     const timer = window.setTimeout(() => setInitialDeskEntry(false), 2400);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!toolMenuOpen) return;
+    const closeToolMenu = (event: PointerEvent) => {
+      if (!toolMenuRef.current?.contains(event.target as Node)) setToolMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", closeToolMenu);
+    return () => window.removeEventListener("pointerdown", closeToolMenu);
+  }, [toolMenuOpen]);
 
   useEffect(() => () => {
     if (markerVisibilityTimerRef.current !== null) {
@@ -1830,11 +1777,10 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   const downloadEntry = useCallback(async () => {
     await downloadNotebookPdf({
       folderTitle: folderTitle ?? prompt,
-      notebookMaterial,
       pages: exportSheets,
       strokes: highlightStrokes,
     });
-  }, [exportSheets, folderTitle, highlightStrokes, notebookMaterial, prompt]);
+  }, [exportSheets, folderTitle, highlightStrokes, prompt]);
 
   const bumpPaper = () => {
     if (reducedMotion) return;
@@ -1858,7 +1804,6 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   const toggleDeskOrder = () => {
     if (deskArrangeTimerRef.current !== null) window.clearTimeout(deskArrangeTimerRef.current);
     pageDragRef.current = null;
-    draggedPageRef.current = null;
     setDraggingPageId(null);
     setDeskArranging(true);
     setPages((current) => current.map((page, index) => ({
@@ -1901,18 +1846,13 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       data-highlighter-active={highlighterActive}
       onClick={(event) => {
         if (!activeArchivedPage || !(event.target instanceof Element)) return;
-        if (event.target.closest(".journal-prompt__back, .journal-prompt__paper, .journal-prompt__tools, .journal-prompt__archived-page, .journal-prompt__marker-station")) return;
+        if (event.target.closest(".journal-prompt__paper, .journal-prompt__tools, .journal-prompt__archived-page, .journal-prompt__marker-station")) return;
         returnToLivePage();
       }}
       role="dialog"
       aria-modal="true"
       aria-label={`${folderTitle ?? "Journal"} writing desk`}
     >
-      {onHome ? (
-        <button aria-label="Back to notebook cover" className="journal-prompt__back" data-help="Back to cover" onClick={onHome} type="button">
-          <ArrowLeftIcon aria-hidden="true" size={21} />
-        </button>
-      ) : null}
       <JournalDeskSurface
         archivedCount={pages.length}
         interactionActive={Boolean(draggingPageId)}
@@ -2041,11 +1981,9 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
               data-releasing={page.id === releasingPageId}
               data-return-target={isReturnTarget || undefined}
               key={page.id}
-              onClick={(event) => {
-                if (draggedPageRef.current === page.id) {
-                  draggedPageRef.current = null;
-                  return;
-                }
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
                 openArchivedPage(page.id, event.currentTarget);
               }}
               onPointerCancel={(event) => {
@@ -2117,7 +2055,6 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 const delta = clampedPageDelta(drag.startRect, rawX, rawY);
                 placeArchivedIndex(drag.element, drag.startRect, delta.x);
                 if (drag.moved) {
-                  draggedPageRef.current = page.id;
                   setPages((current) => current.map((entry) => (
                     entry.id === page.id
                       ? { ...entry, deskX: drag.originX + delta.x, deskY: drag.originY + delta.y }
@@ -2127,6 +2064,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
                 if (drag.element.hasPointerCapture(event.pointerId)) drag.element.releasePointerCapture(event.pointerId);
                 pageDragRef.current = null;
                 setDraggingPageId(null);
+                if (!drag.moved) openArchivedPage(page.id, drag.element);
                 window.requestAnimationFrame(() => {
                   drag.element.style.setProperty("--page-drag-rotation", "0deg");
                 });
@@ -2326,7 +2264,15 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
           {onArchiveNotebook ? <button aria-label="Archive notebook" onClick={onArchiveNotebook} title="Archive notebook" type="button"><ArchiveIcon aria-hidden="true" size={17} />Archive</button> : null}
         </div> : null}
 
-        <div className="journal-prompt__tools" aria-label="Writing tools">
+        <div className="journal-prompt__tools" aria-label="Writing tools" ref={toolMenuRef}>
+          {onHome && toolMenuOpen ? (
+            <div className="journal-prompt__tool-popover" role="menu">
+              <button aria-label="Go to notebook cover" onClick={() => { setToolMenuOpen(false); onHome(); }} role="menuitem" type="button">
+                <HouseIcon aria-hidden="true" size={17} />
+                <span>Home</span>
+              </button>
+            </div>
+          ) : null}
           <div className="journal-prompt__tool-menu" role="toolbar">
             <button
               aria-label="Clear highlights on this page"
@@ -2349,7 +2295,12 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
             >
               <SquaresFourIcon aria-hidden="true" size={18} />
             </button>
-            <button aria-label="Keep a copy" data-help="Keep a copy" data-tool="keep" disabled={!exportSheets.length} onClick={() => { setExportPageIndex(0); setExportTurningIndex(null); setExportPreviewOpen(true); }} type="button"><HugeiconsIcon aria-hidden="true" color="currentColor" icon={BookCopyIcon} size={18} strokeWidth={1.5} /></button>
+            <button aria-label="Keep a copy" data-help="Keep a copy" data-tool="keep" disabled={!exportSheets.length} onClick={() => { setExportPageIndex(0); setExportTurningIndex(null); setExportPreviewOpen(true); }} type="button"><HugeiconsIcon aria-hidden="true" color="currentColor" icon={Notebook01Icon} size={18} strokeWidth={1.5} /></button>
+            {onHome ? (
+              <button aria-expanded={toolMenuOpen} aria-haspopup="menu" aria-label="Open menu" data-help="Menu" data-tool="menu" onClick={() => setToolMenuOpen((open) => !open)} type="button">
+                <ListIcon aria-hidden="true" size={19} />
+              </button>
+            ) : null}
           </div>
         </div>
       </main>

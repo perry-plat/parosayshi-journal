@@ -248,7 +248,7 @@
   overflow: hidden;
   background: linear-gradient(108deg, #fbfaf6 0%, #f8f6f0 58%, #f0ede6 100%);
   border: 0;
-  box-shadow: none;
+  box-shadow: inset 0 0 0 1px rgb(74 66 57 / .13);
   clip-path: polygon(0 0, 100% 0, 100% 99.45%, 87% 99.82%, 65% 99.35%, 38% 99.76%, 16% 99.42%, 0 99.72%);
 }
 
@@ -325,14 +325,12 @@
 
 .journal-prompt__prompt-card { align-self: start; margin-top: clamp(120px, 23vh, 220px); padding: 20px 18px 22px; color: #161616; background-color: #eeede9; background-image: url("/assets/textures/paper-fiber-cc0.jpg"); background-size: 540px auto; background-blend-mode: multiply; border: 1px solid rgb(17 17 17 / 0.17); box-shadow: 0 1px 2px rgb(0 0 0 / 0.16), 0 12px 24px rgb(0 0 0 / 0.1); transform: rotate(-1.4deg); }
 .journal-prompt__prompt-card h1 { margin: 0; font-family: var(--journal-font); font-size: clamp(21px, 1.8vw, 31px); font-weight: 650; font-variation-settings: var(--journal-display-axes); letter-spacing: -0.04em; line-height: 0.98; }
-.journal-prompt__back { position: fixed; top: 18px; left: 18px; z-index: 40; display: grid; width: 38px; height: 38px; padding: 0; color: rgb(245 244 239 / .82); background: transparent; border: 0; cursor: pointer; place-items: center; transition: color 120ms ease, transform 120ms ease; }
-.journal-prompt__back::after { position: absolute; top: 50%; left: calc(100% + 7px); padding: 6px 8px; color: #24231f; background: rgb(248 247 242 / .96); border: 1px solid rgb(20 20 18 / .16); border-radius: 3px; box-shadow: 0 4px 12px rgb(0 0 0 / .16); content: attr(data-help); font: 450 9px/1.1 var(--journal-ui-font); letter-spacing: -.02em; opacity: 0; pointer-events: none; transform: translate(3px, -50%); transition: opacity 110ms ease, transform 110ms ease; white-space: nowrap; }
-.journal-prompt__back:hover { color: #fff; transform: translateX(-2px); }
-.journal-prompt__back:hover::after,
-.journal-prompt__back:focus-visible::after { opacity: 1; transform: translate(0, -50%); }
-.journal-prompt__back:focus-visible { outline: 1px solid rgb(255 255 255 / .55); outline-offset: 2px; }
 .journal-prompt__tools { position: fixed; right: 18px; bottom: 18px; left: auto; z-index: 10; display: block; margin: 0; padding: 0; color: #efefeb; pointer-events: auto; }
 .journal-prompt__tool-menu { display: grid; grid-auto-columns: 40px; grid-auto-flow: column; gap: 1px; place-items: center; overflow: visible; padding: 3px; background: rgb(18 18 17 / .88); border: 1px solid rgb(255 255 255 / .12); border-radius: 8px; box-shadow: 0 7px 20px rgb(0 0 0 / .2), inset 0 1px rgb(255 255 255 / .055); backdrop-filter: blur(12px); }
+.journal-prompt__tool-popover { position: absolute; right: 0; bottom: calc(100% + 8px); min-width: 116px; padding: 4px; background: rgb(18 18 17 / .92); border: 1px solid rgb(255 255 255 / .12); border-radius: 8px; box-shadow: 0 7px 20px rgb(0 0 0 / .22); backdrop-filter: blur(12px); }
+.journal-prompt__tools .journal-prompt__tool-popover button { display: flex; width: 100%; height: 38px; align-items: center; justify-content: flex-start; gap: 9px; padding: 0 10px; font-size: 11px; }
+.journal-prompt__tools .journal-prompt__tool-popover button span { font: 450 11px/1 var(--journal-ui-font); }
+.journal-prompt__tools .journal-prompt__tool-popover button::after { content: none; }
 .journal-prompt__toolbar-title { display: flex; align-items: center; padding: 0 14px; border-right: 1px solid rgb(255 255 255 / 0.15); font-family: var(--journal-ui-font); font-size: 11px; font-weight: 400; font-variation-settings: normal; letter-spacing: -.0275em; white-space: nowrap; }
 .journal-prompt__toolbar-title i { margin-left: 10px; color: #8e8f8b; font-style: normal; }
 .journal-prompt__tools button { position: relative; display: grid; width: 40px; height: 40px; place-items: center; padding: 0; color: rgb(242 242 237 / .74); background: rgb(255 255 255 / .025); border: 0; border-radius: 5px; cursor: pointer; font-family: var(--journal-ui-font); font-size: 0; font-weight: 400; transition: color 120ms ease, background-color 120ms ease, transform 120ms ease; }
