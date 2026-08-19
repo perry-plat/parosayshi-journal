@@ -9,4 +9,8 @@ npm install
 npm run dev
 ```
 
-Drafts stay in this browser's local storage. Highlight strokes stay in IndexedDB. Nothing is sent to a server by the editor.
+Drafts stay in this browser's local storage. Highlight strokes stay in IndexedDB. The editor never sends journal content to a server.
+
+## Analytics
+
+Set `VITE_GA_MEASUREMENT_ID` to a GA4 web stream ID to enable production analytics. Local development does not load Google Analytics. Analytics records page views and a small set of content-free product actions; it never includes journal text or highlight data.

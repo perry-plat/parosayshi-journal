@@ -27,6 +27,7 @@ import {
   saveJournalSnapshot,
 } from "./lib/fieldNotesDb";
 import { getSupabaseClient, signInWithGoogle, supabaseConfigured } from "./lib/supabase";
+import { trackEvent } from "./lib/analytics";
 
 type ProductMode = "threshold" | "naming" | "editor";
 
@@ -527,6 +528,7 @@ export default function App() {
     setFreshDialogOpen(false);
     setReturnedFromEditor(false);
     setMode("editor");
+    trackEvent("notebook_created");
   };
 
   const handleJournalChange = useCallback((snapshot: JournalSnapshot) => {
@@ -574,7 +576,10 @@ export default function App() {
         folderTitle: folder.title,
         snapshot,
       });
-      if (downloaded) setFreshDownloadedId(folder.id);
+      if (downloaded) {
+        setFreshDownloadedId(folder.id);
+        trackEvent("notebook_pdf_downloaded");
+      }
     } finally {
       setFreshBusy(false);
     }

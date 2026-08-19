@@ -6,6 +6,7 @@ import { useReducedMotion } from "../hooks/useReducedMotion";
 import { JournalDeskSurface } from "./JournalDeskSurfaceActive";
 import { DeferredJournalDappledLight } from "./DeferredJournalDappledLight";
 import { notebookPalette, type FolderMaterial, type JournalSnapshot } from "../lib/fieldNotesDb";
+import { trackEvent, trackOncePerSession } from "../lib/analytics";
 import { JournalInkLayer, type HighlighterMotion } from "./JournalInkLayer";
 import {
   createJournalId,
@@ -1892,11 +1893,12 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
   };
 
   const downloadEntry = useCallback(async () => {
-    await downloadNotebookPdf({
+    const downloaded = await downloadNotebookPdf({
       folderTitle: folderTitle ?? prompt,
       pages: exportSheets,
       strokes: highlightStrokes,
     });
+    if (downloaded) trackEvent("notebook_pdf_downloaded");
   }, [exportSheets, folderTitle, highlightStrokes, prompt]);
 
   const bumpPaper = () => {
@@ -1931,6 +1933,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
       deskY: 0,
     })));
     setDeskTidy(true);
+    trackEvent("desk_tidied");
     deskArrangeTimerRef.current = window.setTimeout(() => {
       setDeskArranging(false);
       deskArrangeTimerRef.current = null;
@@ -2360,6 +2363,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
             initialEntry={initialDeskEntry}
             onToggle={() => {
               const nextActive = !highlighterActive;
+              if (nextActive) trackOncePerSession("highlighter_activated");
               if (nextActive) soundRef.current?.markerOpen();
               else soundRef.current?.markerClose();
               if (nextActive) setEraserActive(false);
@@ -2423,7 +2427,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
             >
               <SquaresFourIcon aria-hidden="true" size={18} />
             </button>
-            <button aria-label="Keep a copy" data-help="Keep a copy" data-tool="keep" disabled={!exportSheets.length} onClick={() => { setExportPageIndex(0); setExportTurningIndex(null); setExportPreviewOpen(true); }} type="button"><HugeiconsIcon aria-hidden="true" color="currentColor" icon={Notebook01Icon} size={18} strokeWidth={1.5} /></button>
+            <button aria-label="Keep a copy" data-help="Keep a copy" data-tool="keep" disabled={!exportSheets.length} onClick={() => { setExportPageIndex(0); setExportTurningIndex(null); setExportPreviewOpen(true); trackEvent("notebook_preview_opened"); }} type="button"><HugeiconsIcon aria-hidden="true" color="currentColor" icon={Notebook01Icon} size={18} strokeWidth={1.5} /></button>
             {onHome ? (
               <button aria-label="Go to notebook cover" data-help="Home" data-tool="home" onClick={onHome} type="button">
                 <HouseIcon aria-hidden="true" size={19} />
