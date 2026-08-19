@@ -15,9 +15,15 @@ export function initializeAnalytics() {
   if (!import.meta.env.PROD || !validMeasurementId || !measurementId || window.gtag) return;
 
   window.dataLayer = window.dataLayer ?? [];
-  window.gtag = (...args: unknown[]) => window.dataLayer?.push(args);
+  window.gtag = function gtag(..._args: unknown[]) {
+    window.dataLayer?.push(arguments);
+  };
   window.gtag("js", new Date());
-  window.gtag("config", measurementId, { send_page_view: true });
+  window.gtag("config", measurementId, {
+    allow_ad_personalization_signals: false,
+    allow_google_signals: false,
+    send_page_view: true,
+  });
 
   const script = document.createElement("script");
   script.async = true;
