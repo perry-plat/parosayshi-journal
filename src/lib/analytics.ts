@@ -22,6 +22,7 @@ export function initializeAnalytics() {
   window.gtag("config", measurementId, {
     allow_ad_personalization_signals: false,
     allow_google_signals: false,
+    cookie_flags: "SameSite=Lax;Secure",
     send_page_view: true,
   });
 
