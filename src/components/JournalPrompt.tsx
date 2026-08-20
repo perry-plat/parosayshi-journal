@@ -641,8 +641,12 @@ function createDeskSound() {
     return: assetPath("assets/sounds/journal/return.wav?v=mechanical-2"),
   };
   const regularKeys: SoundName[] = ["key-1", "key-2", "key-3", "key-4"];
+  const typingSamples: SoundName[] = [...regularKeys, "space", "backspace", "return"];
   const outputGain = 0.3;
   let context: AudioContext | null = null;
+  let contextUnlocked = false;
+  let disposed = false;
+  let recoveryTimer = 0;
   let lastStrikeAt = 0;
   let smoothedInterval = 0;
   let dynamics: SoundShape = { gain: 1, rate: 1 };
@@ -653,16 +657,35 @@ function createDeskSound() {
   let markerContactRequested = false;
   let markerContactVoice: { filter: BiquadFilterNode; gain: GainNode; source: AudioBufferSourceNode } | null = null;
 
-  const ensureContext = () => {
-    context ||= new AudioContext();
-    if (context.state === "suspended") void context.resume();
+  const scheduleRecovery = () => {
+    if (disposed || !contextUnlocked || !context || context.state === "running" || context.state === "closed") return;
+    window.clearTimeout(recoveryTimer);
+    recoveryTimer = window.setTimeout(() => {
+      if (disposed || !context || context.state === "running" || context.state === "closed") return;
+      void context.resume().catch(() => undefined);
+    }, 80);
+  };
+
+  const ensureContext = (resume = true) => {
+    if (!context || context.state === "closed") {
+      context = new AudioContext({ latencyHint: "interactive" });
+      context.addEventListener("statechange", scheduleRecovery);
+    }
+    if (resume) {
+      if (context.state === "running") contextUnlocked = true;
+      else {
+        void context.resume()
+          .then(() => { contextUnlocked = true; })
+          .catch(() => undefined);
+      }
+    }
     return context;
   };
 
   const loadSample = (name: SoundName) => {
     const existing = pendingSamples.get(name);
     if (existing) return existing;
-    const audio = ensureContext();
+    const audio = ensureContext(false);
     const path = files[name];
     const pending = (async () => {
       const response = await fetch(path);
@@ -753,7 +776,7 @@ function createDeskSound() {
     }, 115);
   };
 
-  const play = (name: SoundName, gainOverride?: number, rateOverride?: number, delay = 0) => {
+  const play = (name: SoundName, gainOverride?: number, rateOverride?: number, delay = 0, shape = dynamics) => {
     const playNow = () => {
       const audio = ensureContext();
       const path = files[name];
@@ -764,8 +787,8 @@ function createDeskSound() {
         source.buffer = recorded;
         const baseRate = name.startsWith("key-") ? 0.985 + Math.random() * 0.03 : 1;
         const baseGain = name === "return" ? 0.62 : name === "space" ? 0.58 : 0.52 + Math.random() * 0.05;
-        source.playbackRate.value = (rateOverride ?? baseRate) * dynamics.rate;
-        gain.gain.value = Math.min(1, (gainOverride ?? baseGain) * dynamics.gain) * outputGain;
+        source.playbackRate.value = (rateOverride ?? baseRate) * shape.rate;
+        gain.gain.value = Math.min(1, (gainOverride ?? baseGain) * shape.gain) * outputGain;
         source.connect(gain).connect(audio.destination);
         source.start();
         return;
@@ -805,12 +828,26 @@ function createDeskSound() {
     second: [SoundName, number, number],
     delay: number,
   ) => {
-    play(...first);
-    play(...second, delay);
+    const pairShape = { ...dynamics };
+    play(...first, 0, pairShape);
+    play(...second, delay, pairShape);
   };
+
+  const recoverAudio = () => {
+    if (document.visibilityState === "visible") scheduleRecovery();
+  };
+
+  document.addEventListener("visibilitychange", recoverAudio);
+  window.addEventListener("pageshow", recoverAudio);
+  navigator.mediaDevices?.addEventListener("devicechange", scheduleRecovery);
 
   return {
     dispose() {
+      disposed = true;
+      window.clearTimeout(recoveryTimer);
+      document.removeEventListener("visibilitychange", recoverAudio);
+      window.removeEventListener("pageshow", recoverAudio);
+      navigator.mediaDevices?.removeEventListener("devicechange", scheduleRecovery);
       markerContactRequested = false;
       try {
         markerContactVoice?.source.stop();
@@ -820,6 +857,9 @@ function createDeskSound() {
       markerContactVoice = null;
       void context?.close();
       context = null;
+    },
+    prepare() {
+      for (const name of typingSamples) void loadSample(name);
     },
     markerClose() {
       stopMarkerContact();
@@ -1638,6 +1678,7 @@ export function JournalPrompt({ folderTitle, journalKey, notebookMaterial = "kra
 
   useEffect(() => {
     const sound = createDeskSound();
+    sound.prepare();
     soundRef.current = sound;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
