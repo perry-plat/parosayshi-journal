@@ -199,6 +199,7 @@
 
 .journal-prompt__paper-viewport {
   --paper-anchor-offset: 64px;
+  --paper-resting-feed: clamp(190px, 22vh, 220px);
   --paper-top-margin: 40px;
 
   position: relative;
@@ -211,7 +212,7 @@
 .journal-prompt__paper-stack {
   position: absolute;
   right: 0;
-  bottom: calc(var(--paper-feed, 177px) - var(--journal-writing-paper-height));
+  bottom: calc(max(var(--paper-feed, 177px), var(--paper-resting-feed)) - var(--journal-writing-paper-height));
   left: 0;
   height: var(--journal-writing-paper-height);
   container-type: inline-size;
